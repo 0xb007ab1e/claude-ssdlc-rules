@@ -69,6 +69,10 @@ autonomous runs when no human is present. This **narrows** autonomy; it never wi
   with the human/main session or a separately scoped step.
 - **Audit:** record every decision (approve/deny/escalate), the request, the matched policy, and
   rationale (`@rules/topic-logging-observability.md`). Decisions are per-action, not standing.
+- **Granting autonomy (scaffold):** the human fills in the template at
+  `~/.claude/workflows/autonomy-policy.example.json` (who / run / expiry, scoped paths + non-prod
+  environments, an `autoApprove.allowlist` + spend cap, and a reinforcing `alwaysEscalate` list)
+  and passes it as `args.autonomy` to the PM orchestration. Omit it and everything escalates.
 
 ## References
 - master §1/§2/§7; `@rules/std-owasp-llm.md` (LLM08); `@rules/workflow-release.md`,

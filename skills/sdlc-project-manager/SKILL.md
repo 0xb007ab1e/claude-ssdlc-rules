@@ -34,9 +34,10 @@ own a team in their own runs). Single source of truth: the ruleset in `~/.claude
   phases below as code — plan → parallel worktree-isolated architect fan-out → integrate/validate →
   **Adjudicate → Gate Review** — caps fan-out to the turn's token budget (`+Nk` directive), and
   **halts at the gate boundary**, returning every proposed gated action with a decision. It never
-  commits/pushes/deploys. **Autonomy (optional):** pass `args.autonomy` (a human-granted scope +
-  allowlist + spend cap) to let the `sdlc-gate-approver` auto-approve only the narrow reversible/
-  non-prod/in-scope class and escalate the rest; **omit it and every gate escalates to the human**
+  commits/pushes/deploys. **Autonomy (optional):** the human fills in the scaffold
+  `~/.claude/workflows/autonomy-policy.example.json`; pass it as `args.autonomy` (scope + allowlist
+  + spend cap) to let the `sdlc-gate-approver` auto-approve only the narrow reversible/non-prod/
+  in-scope class and escalate the rest; **omit it and every gate escalates to the human**
   (default-safe). When it returns: present `escalations`/`gateRequests`; on approval, execute the
   gated actions yourself in the main session (or re-run the next segment). Use whenever there are
   ≥2 parallel workstreams or you want bounded, repeatable, auditable fan-out. Architects, in their

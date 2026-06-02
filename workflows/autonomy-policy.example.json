@@ -1,0 +1,30 @@
+{
+  "_README": "Scaffold for opt-in autonomous gate approval. Copy, replace every REQUIRED value, and pass as args.autonomy to sdlc-pm-orchestration. OMIT this entirely and EVERY gate escalates to the human (default-safe). The gate-approver fails closed: anything not explicitly on autoApprove.allowlist is escalated; alwaysEscalate is reinforcing. See rules/workflow-gated-actions.md.",
+  "grantedBy": "REQUIRED: who is authorizing (name/handle)",
+  "run": "REQUIRED: short description or ticket id this grant applies to",
+  "expires": "this-run-only",
+  "scope": {
+    "paths": ["REQUIRED: globs this run may touch, e.g. src/**, tests/**"],
+    "environments": ["local", "worktree"]
+  },
+  "autoApprove": {
+    "allowlist": [
+      "local commit on a feature branch in an isolated worktree",
+      "open a DRAFT pull request",
+      "run tests / linters / scanners"
+    ],
+    "spendCapUsd": 0,
+    "requireRollback": true
+  },
+  "alwaysEscalate": [
+    "push to a shared/protected branch",
+    "merge",
+    "deploy or promote to any shared/prod environment",
+    "terraform apply/destroy or any apply to real infrastructure",
+    "create/rotate/revoke real secrets",
+    "outward-facing sends (email/SMS/push, paid or external APIs)",
+    "spend over the cap",
+    "production or data access/export",
+    "relaxing a security gate or accepting a risk waiver"
+  ]
+}
