@@ -71,6 +71,13 @@ T1 = tier 1, T2 = tier 2. "∥" = parallel.
 Gate Review`. Budget-capped to the turn's `+Nk` target. A red-team **no-consensus** halts before
 building; a reviewer **block** suppresses autonomous execution; escalations/denials are never executed.
 
+## Prerequisites (gotchas)
+- **Restart after adding/editing roles.** Agents and skills register at **session start**. New or
+  edited `sdlc-*` files on disk are NOT live until Claude Code restarts — until then the Workflow /
+  Agent tool can't resolve them (`agent type 'sdlc-…' not found`).
+- **Run the PM Workflow from inside the target git repo.** The architect/engineer subagents use
+  `isolation: worktree`, which needs a git repo as the cwd; a non-repo cwd fails the parallel fan-out.
+
 ## How to invoke
 - **Single role:** `/sdlc-sme <topic>`, `/sdlc-reviewer <diff>`, `/sdlc-software-architect <task>`, …
 - **Full delivery:** `/sdlc-project-manager <goal>` (Direct mode for simple work; Workflow mode for

@@ -29,6 +29,9 @@ own a team in their own runs). Single source of truth: the ruleset in `~/.claude
 
 ## Orchestration modes — pick one
 - **Workflow mode (preferred for multi-workstream delivery): deterministic, budgeted, gate-bounded.**
+  **Prerequisites:** (1) the `sdlc-*` agents/skills register only at **session start** — if they
+  were just added/edited, **restart Claude Code** first; (2) run from **inside the target git
+  repo** — the architect/engineer subagents use worktree isolation and need a git repo as the cwd.
   Invoke the Workflow tool with `scriptPath` = the absolute path of
   `~/.claude/workflows/sdlc-pm-orchestration.js` and `args: { goal: "<the goal>" }`. It runs the
   phases below as code: plan → **Challenge** (red-team the plan — consensus or escalate before

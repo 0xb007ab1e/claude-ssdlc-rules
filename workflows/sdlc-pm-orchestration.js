@@ -1,11 +1,7 @@
 export const meta = {
   name: 'sdlc-pm-orchestration',
   description:
-    'SDLC Project Manager orchestration: plan a goal into disjoint workstreams, fan out to the ' +
-    'Software/Infrastructure Architect subagents in parallel worktrees, integrate + validate, ' +
-    'then halt at a gate-review boundary returning every proposed gated action for human ' +
-    'approval. Budget-aware (caps fan-out to the turn token target). Never performs gated ' +
-    'actions (no commit/push/deploy/apply) — that stays with the human in the main session.',
+    'SDLC Project Manager orchestration: plan a goal into disjoint workstreams, fan out to the Software/Infrastructure Architect subagents in parallel worktrees, integrate + validate, review, then halt at a gate-review boundary returning every proposed gated action for human approval. Budget-aware (caps fan-out to the turn token target). Never performs gated actions (no commit/push/deploy/apply) unless an autonomy policy approves the narrow reversible class.',
   phases: [
     { title: 'Plan', detail: 'decompose the goal into disjoint, parallelizable workstreams' },
     { title: 'Challenge', detail: 'red-team the plan; consensus or escalate before building' },
@@ -122,15 +118,29 @@ const CHALLENGE_SCHEMA = {
   },
   required: ['consensus'],
 }
-const challenge = await agent(
-  `You are the SDLC Red Team. Steelman, then challenge this PLAN for goal "${goal}" before any ` +
-    `building: hidden assumptions, failure modes, risks (severity per master §7), missing ` +
-    `alternatives, and any non-disjoint/file-overlap or scope problems across workstreams. Cite ` +
-    `sources for factual counterpoints. Set consensus=false and blocking=true ONLY for material, ` +
-    `unresolved problems. Follow ~/.claude/rules/skills... (the sdlc-red-team role).\n\n` +
-    `Plan: ${JSON.stringify({ assumptions: plan.assumptions, workstreams }).slice(0, 8000)}`,
-  { label: 'red-team:plan', phase: 'Challenge', schema: CHALLENGE_SCHEMA, agentType: 'sdlc-red-team' },
-)
+let challenge
+try {
+  challenge = await agent(
+    `You are the SDLC Red Team. Steelman, then challenge this PLAN for goal "${goal}" before any ` +
+      `building: hidden assumptions, failure modes, risks (severity per master §7), missing ` +
+      `alternatives, and any non-disjoint/file-overlap or scope problems across workstreams. Cite ` +
+      `sources for factual counterpoints. Set consensus=false and blocking=true ONLY for material, ` +
+      `unresolved problems. Follow the sdlc-red-team role.\n\n` +
+      `Plan: ${JSON.stringify({ assumptions: plan.assumptions, workstreams }).slice(0, 8000)}`,
+    { label: 'red-team:plan', phase: 'Challenge', schema: CHALLENGE_SCHEMA, agentType: 'sdlc-red-team' },
+  )
+} catch (e) {
+  // First use of an sdlc-* agentType — fail gracefully with the likely cause + remedy.
+  return {
+    goal,
+    error: `SDLC role agents unavailable: ${String((e && e.message) || e)}`,
+    plan: workstreams,
+    remedy:
+      'The sdlc-* agents/skills register only at SESSION START. If you just created/edited them, ' +
+      'RESTART Claude Code, then re-run. Also run Workflow mode from INSIDE the target git repo — ' +
+      'the architect/engineer agents use worktree isolation and need a git repo as the cwd.',
+  }
+}
 const blocking = ((challenge && challenge.objections) || []).filter((o) => o.blocking)
 if (challenge && challenge.consensus === false && blocking.length) {
   log(`NO CONSENSUS — red team raised ${blocking.length} blocking objection(s). Escalating to the human before building.`)
