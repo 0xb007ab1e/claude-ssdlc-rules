@@ -11,6 +11,7 @@ export const meta = {
     { title: 'Challenge', detail: 'red-team the plan; consensus or escalate before building' },
     { title: 'Architect', detail: 'software + infra architects in parallel, worktree-isolated' },
     { title: 'Integrate', detail: 'reconcile worktrees, flag conflicts, validate against gates' },
+    { title: 'Review', detail: 'reviewer security/quality gate; a block disables auto-execution' },
     { title: 'Adjudicate', detail: 'gate-approver triages gates (only if autonomy granted)' },
     { title: 'Execute', detail: 'gate-executor runs ONLY approved reversible actions' },
     { title: 'Gate Review', detail: 'consolidate decisions; escalate to human; halt' },
@@ -178,6 +179,45 @@ const integration = await agent(
   { label: 'integrate', phase: 'Integrate' },
 )
 
+// ---- Review (security & quality gate over the integrated work) ----
+phase('Review')
+const REVIEW_SCHEMA = {
+  type: 'object',
+  properties: {
+    verdict: { type: 'string', enum: ['approve', 'changes-requested', 'block'] },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          severity: { type: 'string' },
+          file: { type: 'string' },
+          fix: { type: 'string' },
+        },
+        required: ['title', 'severity'],
+      },
+    },
+  },
+  required: ['verdict'],
+}
+const review = await agent(
+  `You are the SDLC Reviewer. Review the integrated change for goal "${goal}" against the ruleset ` +
+    `(correctness, security→CWE/OWASP, tests/coverage, concurrency/resource/numeric, anti-patterns, ` +
+    `docs). Give findings with severity (master §7) + fixes and a verdict. Block on unresolved ` +
+    `critical/high security or correctness issues. Advisory — do not commit/merge.\n\n` +
+    `Integration: ${String(integration).slice(0, 6000)}\nWork: ${JSON.stringify(work).slice(0, 6000)}`,
+  { label: 'reviewer', phase: 'Review', schema: REVIEW_SCHEMA, agentType: 'sdlc-reviewer' },
+)
+const reviewFindings = (review && review.findings) || []
+const reviewBlock =
+  (review && review.verdict === 'block') ||
+  reviewFindings.some((f) => /crit|high/i.test(f.severity || ''))
+log(
+  `Review verdict: ${(review && review.verdict) || 'n/a'} · ${reviewFindings.length} finding(s)` +
+    (reviewBlock ? ' — BLOCKING: autonomous execution disabled; escalate to human.' : '.'),
+)
+
 const gateRequests = work.flatMap((w) => (w.gateRequests || []).map((g) => ({ ...g, workstream: w.workstream })))
 
 // ---- Adjudicate (gate-approver — only if the human granted an autonomy policy) ----
@@ -234,7 +274,9 @@ const denied = decisions.filter((d) => d.decision === 'deny')
 // ---- Execute (gate-executor runs ONLY approved, reversible, in-scope actions) ----
 phase('Execute')
 let executed = null
-if (autonomy && approved.length) {
+if (reviewBlock && approved.length) {
+  log(`Execution suppressed: the Reviewer blocked the change — even approved gates are escalated to the human.`)
+} else if (autonomy && approved.length) {
   executed = await agent(
     `You are the SDLC Gate Executor (separation of duties — you did not decide or raise these). ` +
       `Execute ONLY these already-APPROVED, reversible, non-prod, in-scope actions — verbatim, one ` +
@@ -264,6 +306,7 @@ return {
   assumptions: (plan && plan.assumptions) || [],
   workstreams: work.map((w) => ({ id: w.workstream, role: w.role, summary: w.summary, artifacts: w.artifacts || [] })),
   integration,
+  review: { verdict: (review && review.verdict) || null, findings: reviewFindings, blocked: reviewBlock },
   gateRequests,
   gateDecisions: decisions,
   approved,

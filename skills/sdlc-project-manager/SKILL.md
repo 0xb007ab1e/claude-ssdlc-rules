@@ -32,7 +32,8 @@ own a team in their own runs). Single source of truth: the ruleset in `~/.claude
   Invoke the Workflow tool with `scriptPath` = the absolute path of
   `~/.claude/workflows/sdlc-pm-orchestration.js` and `args: { goal: "<the goal>" }`. It runs the
   phases below as code: plan → **Challenge** (red-team the plan — consensus or escalate before
-  building) → parallel worktree-isolated architect fan-out → integrate/validate → **Adjudicate**
+  building) → parallel worktree-isolated architect fan-out → integrate/validate → **Review**
+  (security/quality gate; a `block` verdict disables autonomous execution) → **Adjudicate**
   (gate-approver) → **Execute** (gate-executor runs ONLY approved actions) → **Gate Review**. Caps
   fan-out to the turn's token budget (`+Nk` directive). **Autonomy (optional):** the human fills in
   the scaffold `~/.claude/workflows/autonomy-policy.example.json`; pass it as `args.autonomy` (scope
@@ -77,8 +78,10 @@ own a team in their own runs). Single source of truth: the ruleset in `~/.claude
   (b) run that architect in the main context in a follow-up so *it* can delegate. Architects return
   "needs further delegation" requests; you decide how to fan out.
 
-## SDLC flow you orchestrate (delegate to the right rule/role)
-new project → Software Architect bootstraps (`workflow-bootstrap`); build → architects + teams;
-verify → review (`workflow-code-review`, `std-owasp*`) + threat model (`workflow-threat-model`);
-release → `workflow-release` (gated); operate → `workflow-incident-response`, runbooks. Pull the
-specific rule modules; don't reinvent them.
+## SDLC flow you orchestrate (delegate to the right role)
+new project → **Software Architect** bootstraps (`workflow-bootstrap`); build → **architects +
+engineers**; verify → **`sdlc-reviewer`** (security/quality) + threat model
+(`workflow-threat-model`); release → **`sdlc-release-manager`** (prepares; tag/deploy gated);
+operate → **`sdlc-incident-commander`** + runbooks. Advisory: **`sdlc-sme`** for sourced
+expertise; **`sdlc-red-team`** to challenge a contested decision (consensus or escalate). Pull the
+specific roles/rule modules; don't reinvent them.
