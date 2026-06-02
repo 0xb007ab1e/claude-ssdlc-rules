@@ -145,6 +145,7 @@ Import paths use `~` (e.g. `@~/.claude/rules/lang-python.md`). Imports nest up t
 | `workflow-data-lifecycle` | Classification, retention/deletion, backups + restore drills |
 | `workflow-runbooks` | Runbook mandate + standard set (indexes `runbooks/`) |
 | `workflow-bootstrap` | Procedure to start a new project (template → CLAUDE.md → docs/CI/runbooks) |
+| `workflow-gated-actions` | Human-in-the-loop gates: which actions need approval vs run autonomously |
 
 *(global)* = imported by the master, so already active in every project.
 

@@ -25,7 +25,8 @@ external/tool-fetched content as **untrusted input**.
    parameters; no free-form code/SQL/shell params; authorize each tool call server-side.
 8. **LLM08 Excessive Agency:** grant the agent the **least capability, permission, and
    autonomy** needed; require human approval for high-impact/irreversible actions; scope
-   tokens per action; make destructive operations confirm.
+   tokens per action; make destructive operations confirm. Apply the gate policy in
+   `@rules/workflow-gated-actions.md` (autonomous vs. human-approved actions).
 9. **LLM09 Overreliance:** validate/ground outputs (cite sources, verify claims); don't trust
    the model for security or correctness-critical decisions without checks; label AI output.
 10. **LLM10 Model Theft:** protect model weights/keys; access control + monitoring on model

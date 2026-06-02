@@ -171,7 +171,7 @@ Example — a Python web service handling personal data:
 **Workflows:** `workflow-git` · `workflow-cicd` · `workflow-threat-model`
 · `workflow-secrets` · `workflow-vuln-mgmt` · `workflow-cve-management` · `workflow-code-review`
 · `workflow-release` · `workflow-incident-response` · `workflow-data-lifecycle`
-· `workflow-runbooks` · `workflow-bootstrap`
+· `workflow-runbooks` · `workflow-bootstrap` · `workflow-gated-actions`
 **Templates:** `templates/python-web-service` · `templates/typescript-service`
 · `templates/cli-tool` · `templates/library` · `templates/ai-llm-service`
 · `templates/web-frontend-spa` · `templates/serverless-function` · `templates/data-pipeline`
