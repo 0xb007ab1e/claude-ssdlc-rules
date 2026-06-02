@@ -8,9 +8,11 @@ export const meta = {
     'actions (no commit/push/deploy/apply) — that stays with the human in the main session.',
   phases: [
     { title: 'Plan', detail: 'decompose the goal into disjoint, parallelizable workstreams' },
+    { title: 'Challenge', detail: 'red-team the plan; consensus or escalate before building' },
     { title: 'Architect', detail: 'software + infra architects in parallel, worktree-isolated' },
     { title: 'Integrate', detail: 'reconcile worktrees, flag conflicts, validate against gates' },
     { title: 'Adjudicate', detail: 'gate-approver triages gates (only if autonomy granted)' },
+    { title: 'Execute', detail: 'gate-executor runs ONLY approved reversible actions' },
     { title: 'Gate Review', detail: 'consolidate decisions; escalate to human; halt' },
   ],
 }
@@ -96,6 +98,53 @@ if (budget.total) {
 }
 log(`${workstreams.length} workstream(s): ${workstreams.map((w) => `${w.id}[${w.role}]`).join(', ')}`)
 
+// ---- Challenge (red-team the plan; consensus or escalate before building) ----
+phase('Challenge')
+const CHALLENGE_SCHEMA = {
+  type: 'object',
+  properties: {
+    consensus: { type: 'boolean' },
+    objections: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          point: { type: 'string' },
+          severity: { type: 'string' },
+          blocking: { type: 'boolean' },
+          source: { type: 'string' },
+        },
+        required: ['point', 'blocking'],
+      },
+    },
+    recommendation: { type: 'string' },
+  },
+  required: ['consensus'],
+}
+const challenge = await agent(
+  `You are the SDLC Red Team. Steelman, then challenge this PLAN for goal "${goal}" before any ` +
+    `building: hidden assumptions, failure modes, risks (severity per master §7), missing ` +
+    `alternatives, and any non-disjoint/file-overlap or scope problems across workstreams. Cite ` +
+    `sources for factual counterpoints. Set consensus=false and blocking=true ONLY for material, ` +
+    `unresolved problems. Follow ~/.claude/rules/skills... (the sdlc-red-team role).\n\n` +
+    `Plan: ${JSON.stringify({ assumptions: plan.assumptions, workstreams }).slice(0, 8000)}`,
+  { label: 'red-team:plan', phase: 'Challenge', schema: CHALLENGE_SCHEMA, agentType: 'sdlc-red-team' },
+)
+const blocking = ((challenge && challenge.objections) || []).filter((o) => o.blocking)
+if (challenge && challenge.consensus === false && blocking.length) {
+  log(`NO CONSENSUS — red team raised ${blocking.length} blocking objection(s). Escalating to the human before building.`)
+  return {
+    goal,
+    halted: 'no-consensus-on-plan',
+    assumptions: plan.assumptions || [],
+    plan: workstreams,
+    blockingObjections: blocking,
+    recommendation: challenge.recommendation,
+    note: 'Red Team withheld consensus on the plan. Escalated to the parent (human) for a ruling; no work was performed. Resolve the objections, then re-run.',
+  }
+}
+log(`Red Team consensus on the plan${blocking.length ? '' : ' (no blocking objections)'}; proceeding.`)
+
 // ---- Architect fan-out (parallel, worktree-isolated) ----
 phase('Architect')
 const results = await parallel(
@@ -175,16 +224,38 @@ if (gateRequests.length && autonomy) {
   log(`No autonomy policy granted → all ${gateRequests.length} gate(s) escalate to the human (default-safe).`)
 }
 
-// ---- Gate review (halt; the workflow executes NO gated actions) ----
-phase('Gate Review')
 const decisions =
   (adjudication && adjudication.decisions) ||
   gateRequests.map((g) => ({ id: g.action, decision: 'escalate', matchedPolicy: 'default-escalate', reason: 'no autonomy policy granted' }))
+const approved = decisions.filter((d) => d.decision === 'approve')
 const escalated = decisions.filter((d) => d.decision === 'escalate')
+const denied = decisions.filter((d) => d.decision === 'deny')
+
+// ---- Execute (gate-executor runs ONLY approved, reversible, in-scope actions) ----
+phase('Execute')
+let executed = null
+if (autonomy && approved.length) {
+  executed = await agent(
+    `You are the SDLC Gate Executor (separation of duties — you did not decide or raise these). ` +
+      `Execute ONLY these already-APPROVED, reversible, non-prod, in-scope actions — verbatim, one ` +
+      `at a time, verify and audit each. NEVER push to a protected branch, merge, deploy, apply to ` +
+      `real infra, touch secrets/prod, or do anything not in this approved list; if any is ambiguous ` +
+      `or out of scope, SKIP and escalate. Follow ~/.claude/rules/workflow-gated-actions.md.\n\n` +
+      `Granted autonomy: ${JSON.stringify(autonomy)}\n\nApproved actions: ${JSON.stringify(approved).slice(0, 6000)}`,
+    { label: 'gate-executor', phase: 'Execute', agentType: 'sdlc-gate-executor' },
+  )
+  log(`Executed ${approved.length} approved (reversible/non-prod) action(s) via the gate-executor.`)
+} else if (approved.length) {
+  log(`${approved.length} action(s) approvable but no autonomy granted → left for the human.`)
+}
+
+// ---- Gate review (escalations stay with the human; nothing escalated/denied was executed) ----
+phase('Gate Review')
 log(
   gateRequests.length
-    ? `GATE REVIEW — ${escalated.length} of ${gateRequests.length} gate(s) require HUMAN approval. ` +
-        `Halting by policy: the workflow executes NO gated actions (approved ones run in the main session).`
+    ? `GATE REVIEW — approved ${approved.length} (executed: ${executed ? 'yes' : 'no'}) · denied ` +
+        `${denied.length} · escalated ${escalated.length}. The ${escalated.length} escalation(s) ` +
+        `require HUMAN approval; the workflow executed nothing escalated or denied.`
     : 'No gated actions proposed by the architects.',
 )
 
@@ -195,11 +266,14 @@ return {
   integration,
   gateRequests,
   gateDecisions: decisions,
+  approved,
+  executed,
   escalations: escalated,
+  denied,
   needsEngineers: work.flatMap((w) => w.needsEngineers || []),
   tokensSpent: budget.total ? budget.spent() : undefined,
   note:
-    'Autonomous phases done in isolated worktrees. The gate-approver triaged gates within the ' +
-    'human-granted autonomy (or escalated all if none granted); the workflow executes NO gated ' +
-    'actions — the human executes approved/escalated ones in the main session. Never auto-approved past policy.',
+    'Autonomous phases done in isolated worktrees. With autonomy granted, the gate-executor ran ONLY ' +
+    'the approved reversible/non-prod class (separation of duties from the approver). Escalations ' +
+    'and denials were NOT executed — the human rules on escalations in the main session.',
 }

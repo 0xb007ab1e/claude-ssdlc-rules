@@ -73,6 +73,13 @@ autonomous runs when no human is present. This **narrows** autonomy; it never wi
   `~/.claude/workflows/autonomy-policy.example.json` (who / run / expiry, scoped paths + non-prod
   environments, an `autoApprove.allowlist` + spend cap, and a reinforcing `alwaysEscalate` list)
   and passes it as `args.autonomy` to the PM orchestration. Omit it and everything escalates.
+- **Execution — separation of duties.** The approver only *decides*. Approved actions (the narrow
+  reversible/non-prod/in-scope class) may then be executed autonomously by a **separate**
+  `sdlc-gate-executor` — never by the approver and never by the role that raised the request. The
+  executor performs **only** `approve`-marked actions, one at a time, verified and audited, and
+  **never** executes `escalate`/`deny` items or anything not explicitly approved (push to
+  protected, deploy, real infra apply, secrets, outward, spend, prod/data stay human). It fails
+  closed: ambiguous or out-of-scope → skip and escalate.
 
 ## References
 - master §1/§2/§7; `@rules/std-owasp-llm.md` (LLM08); `@rules/workflow-release.md`,

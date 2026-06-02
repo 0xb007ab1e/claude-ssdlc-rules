@@ -31,17 +31,21 @@ own a team in their own runs). Single source of truth: the ruleset in `~/.claude
 - **Workflow mode (preferred for multi-workstream delivery): deterministic, budgeted, gate-bounded.**
   Invoke the Workflow tool with `scriptPath` = the absolute path of
   `~/.claude/workflows/sdlc-pm-orchestration.js` and `args: { goal: "<the goal>" }`. It runs the
-  phases below as code — plan → parallel worktree-isolated architect fan-out → integrate/validate →
-  **Adjudicate → Gate Review** — caps fan-out to the turn's token budget (`+Nk` directive), and
-  **halts at the gate boundary**, returning every proposed gated action with a decision. It never
-  commits/pushes/deploys. **Autonomy (optional):** the human fills in the scaffold
-  `~/.claude/workflows/autonomy-policy.example.json`; pass it as `args.autonomy` (scope + allowlist
-  + spend cap) to let the `sdlc-gate-approver` auto-approve only the narrow reversible/non-prod/
-  in-scope class and escalate the rest; **omit it and every gate escalates to the human**
-  (default-safe). When it returns: present `escalations`/`gateRequests`; on approval, execute the
-  gated actions yourself in the main session (or re-run the next segment). Use whenever there are
-  ≥2 parallel workstreams or you want bounded, repeatable, auditable fan-out. Architects, in their
-  own runs, fan out to their engineers (`sdlc-backend/frontend/security/qa/sre-engineer`).
+  phases below as code: plan → **Challenge** (red-team the plan — consensus or escalate before
+  building) → parallel worktree-isolated architect fan-out → integrate/validate → **Adjudicate**
+  (gate-approver) → **Execute** (gate-executor runs ONLY approved actions) → **Gate Review**. Caps
+  fan-out to the turn's token budget (`+Nk` directive). **Autonomy (optional):** the human fills in
+  the scaffold `~/.claude/workflows/autonomy-policy.example.json`; pass it as `args.autonomy` (scope
+  + allowlist + spend cap). With it, the `sdlc-gate-approver` auto-approves only the narrow
+  reversible/non-prod/in-scope class and a **separate** `sdlc-gate-executor` actually performs those
+  (separation of duties); everything else escalates. **Omit it and every gate escalates** to the
+  human (default-safe). Escalations/denials are **never** executed. The Challenge phase halts the
+  run if the red team withholds consensus on a material point. When it returns: present
+  `escalations` (and `executed`); rule on escalations in the main session or re-run the next
+  segment. Use whenever there are ≥2 parallel workstreams or you want bounded, auditable fan-out.
+  Architects, in their own runs, fan out to their engineers
+  (`sdlc-backend/frontend/security/qa/sre-engineer`); consult `sdlc-sme` for sourced expertise and
+  `sdlc-red-team` to challenge any contested decision (consensus before proceeding, else escalate).
 - **Direct mode (simple/interactive): free-form Agent fan-out.** For a single workstream or
   exploratory work, skip the workflow and spawn architects directly (next section).
 
