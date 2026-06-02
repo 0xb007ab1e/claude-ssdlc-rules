@@ -5,8 +5,10 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-ROOT="${HOME}/.claude"
-RULES="${ROOT}/rules"
+# Derive paths from this script's own location (rules/check-rules.sh) so it works both
+# in-place (~/.claude) and from a CI checkout of the claude-ssdlc-rules repo.
+RULES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(dirname "$RULES")"
 MASTER="${ROOT}/CLAUDE.md"
 README="${RULES}/README.md"
 fail=0
