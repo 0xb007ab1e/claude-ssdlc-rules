@@ -19,9 +19,10 @@ echo "== 1. @import path resolution =="
 mapfile -t imports < <(grep -rhoE --include='*.md' '@[A-Za-z0-9/_.~-]+\.md' "$MASTER" "$RULES" | sed -E 's/^@//' | sort -u)
 for imp in "${imports[@]}"; do
   case "$imp" in
-    "~/"*) path="${HOME}/${imp#\~/}" ;;   # @~/.claude/rules/x.md (template form)
-    /*)    path="$imp" ;;
-    *)     path="${ROOT}/${imp}" ;;        # @rules/x.md (relative to ~/.claude)
+    "~/.claude/"*) path="${ROOT}/${imp#\~/.claude/}" ;;  # template form → repo root (CI-safe)
+    "~/"*)         path="${HOME}/${imp#\~/}" ;;          # other ~ paths
+    /*)            path="$imp" ;;
+    *)             path="${ROOT}/${imp}" ;;              # @rules/x.md (relative to root)
   esac
   if [[ ! -f "$path" ]]; then
     echo "  BROKEN: @${imp} -> ${path}"
