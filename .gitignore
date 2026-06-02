@@ -1,0 +1,14 @@
+# Allowlist policy: ~/.claude holds secrets (.credentials.json, history.jsonl,
+# sessions/, daemon logs). Ignore EVERYTHING, then track only the SSDLC ruleset.
+/*
+!/.gitignore
+!/CLAUDE.md
+!/rules/
+
+# Belt-and-suspenders: never track these even if a rule above is loosened.
+.credentials.json
+history.jsonl
+*.log
+sessions/
+session-env/
+projects/
