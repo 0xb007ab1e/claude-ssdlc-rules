@@ -32,11 +32,15 @@ own a team in their own runs). Single source of truth: the ruleset in `~/.claude
   Invoke the Workflow tool with `scriptPath` = the absolute path of
   `~/.claude/workflows/sdlc-pm-orchestration.js` and `args: { goal: "<the goal>" }`. It runs the
   phases below as code — plan → parallel worktree-isolated architect fan-out → integrate/validate →
-  **Gate Review** — caps fan-out to the turn's token budget (`+Nk` directive), and **halts at the
-  gate boundary**, returning every proposed gated action. It never commits/pushes/deploys. When it
-  returns: present `gateRequests` to the human; on approval, execute the gated actions yourself in
-  the main session (or re-run for the next segment). Use this whenever there are ≥2 parallel
-  workstreams or you want bounded, repeatable, auditable fan-out.
+  **Adjudicate → Gate Review** — caps fan-out to the turn's token budget (`+Nk` directive), and
+  **halts at the gate boundary**, returning every proposed gated action with a decision. It never
+  commits/pushes/deploys. **Autonomy (optional):** pass `args.autonomy` (a human-granted scope +
+  allowlist + spend cap) to let the `sdlc-gate-approver` auto-approve only the narrow reversible/
+  non-prod/in-scope class and escalate the rest; **omit it and every gate escalates to the human**
+  (default-safe). When it returns: present `escalations`/`gateRequests`; on approval, execute the
+  gated actions yourself in the main session (or re-run the next segment). Use whenever there are
+  ≥2 parallel workstreams or you want bounded, repeatable, auditable fan-out. Architects, in their
+  own runs, fan out to their engineers (`sdlc-backend/frontend/security/qa/sre-engineer`).
 - **Direct mode (simple/interactive): free-form Agent fan-out.** For a single workstream or
   exploratory work, skip the workflow and spawn architects directly (next section).
 

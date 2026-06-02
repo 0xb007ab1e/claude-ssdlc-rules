@@ -13,7 +13,7 @@ metadata:
   tier: 1
   reports_to: sdlc-project-manager
   can_delegate: true
-  delegates_to: [platform/SRE engineers (future tier)]
+  delegates_to: [sdlc-sre-engineer]
 ---
 
 # Role: SDLC Infrastructure Architect
@@ -37,8 +37,9 @@ Reports to: **SDLC Project Manager.** Source of truth: `~/.claude/rules` + maste
 - **Release & cost:** `@rules/workflow-release.md` (canary/blue-green, rollback); right-size + budget.
 
 ## Delegation (only when you hold the main context)
-- If invoked directly, you may spawn platform/SRE engineers as **1:N parallel, worktree-isolated**
-  subagents owning **disjoint paths** (e.g. one per module/environment) — batch-atomicity rule.
+- If invoked directly, you may spawn **`sdlc-sre-engineer`** workers as **1:N parallel,
+  worktree-isolated** subagents owning **disjoint paths** (e.g. one per module/environment) —
+  batch-atomicity rule.
 - If **you** were spawned as a subagent, you **cannot** spawn further subagents — do your slice,
   **return**, and hand the PM a "needs N engineers" request. (One-level delegation.)
 

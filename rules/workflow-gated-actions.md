@@ -47,6 +47,29 @@ confirm hard-to-reverse"), §2 (fail closed, least privilege, complete mediation
   or agent's `allowed-tools`, so the permission layer still prompts. Gating is enforced by
   **policy + permissions together**, not policy alone.
 
+## Autonomous approval authority (delegated — for unattended runs)
+A designated approver role (e.g. the `sdlc-gate-approver`) may **adjudicate** gate requests during
+autonomous runs when no human is present. This **narrows** autonomy; it never widens it.
+
+- **Opt-in per run, scoped by the human.** Autonomous approval is **OFF by default**: with no
+  explicit, human-granted policy for the run, the approver **escalates everything** (current
+  behavior preserved). The human pre-authorizes a specific scope/allowlist per run.
+- **May auto-approve only if ALL hold:** reversible, **non-production**, no real secrets, no
+  spend above a preset cap (default $0), within the run's declared scope, has a stated rollback,
+  and is on the human's pre-authorized allowlist. Typical: a local commit on a feature branch in
+  an isolated worktree, a **draft** PR, running tests/scanners, an ephemeral non-prod sandbox.
+- **MUST escalate to the human (never auto-approve):** push to a shared/protected branch, merge,
+  any deploy/promotion, IaC `apply`/`destroy` to real infra, create/rotate/revoke real secrets,
+  outward-facing sends, spend over the cap, prod/data access, relaxing a security gate or risk
+  waiver, anything destructive outside a worktree, and anything novel or ambiguous.
+- **MUST deny:** requests that fail a security rule, lack a rollback, exceed the granted scope, or
+  are otherwise unsafe — with a reason.
+- **Fail closed:** default decision is **escalate**; approve only on an explicit, unambiguous
+  policy match. The approver **decides only — it does not execute** gated actions; execution stays
+  with the human/main session or a separately scoped step.
+- **Audit:** record every decision (approve/deny/escalate), the request, the matched policy, and
+  rationale (`@rules/topic-logging-observability.md`). Decisions are per-action, not standing.
+
 ## References
 - master §1/§2/§7; `@rules/std-owasp-llm.md` (LLM08); `@rules/workflow-release.md`,
   `@rules/workflow-secrets.md`, `@rules/workflow-incident-response.md`. Index:

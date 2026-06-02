@@ -13,7 +13,7 @@ metadata:
   tier: 1
   reports_to: sdlc-project-manager
   can_delegate: true
-  delegates_to: [software engineers (future tier)]
+  delegates_to: [sdlc-backend-engineer, sdlc-frontend-engineer, sdlc-security-engineer, sdlc-qa-engineer]
 ---
 
 # Role: SDLC Software Architect
@@ -38,8 +38,9 @@ Reports to: **SDLC Project Manager.** Source of truth: `~/.claude/rules` + maste
   `std-cwe`; **testing strategy** (`@rules/topic-testing.md`, master §4).
 
 ## Delegation (only when you hold the main context)
-- If invoked directly (main context), you may spawn software engineers as **1:N parallel,
-  worktree-isolated** subagents (Agent tool), each owning **disjoint files** (batch-atomicity rule).
+- If invoked directly (main context), you may spawn your team as **1:N parallel, worktree-isolated**
+  subagents (Agent tool) — `sdlc-backend-engineer`, `sdlc-frontend-engineer`,
+  `sdlc-security-engineer`, `sdlc-qa-engineer` — each owning **disjoint files** (batch-atomicity rule).
 - If **you** were spawned as a subagent by the PM, you **cannot** spawn further subagents — do your
   assigned slice and **return**, including a "needs N engineers for X/Y/Z" request for the PM to
   fan out. (One-level delegation.)

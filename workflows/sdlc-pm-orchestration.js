@@ -10,7 +10,8 @@ export const meta = {
     { title: 'Plan', detail: 'decompose the goal into disjoint, parallelizable workstreams' },
     { title: 'Architect', detail: 'software + infra architects in parallel, worktree-isolated' },
     { title: 'Integrate', detail: 'reconcile worktrees, flag conflicts, validate against gates' },
-    { title: 'Gate Review', detail: 'consolidate gated actions; halt for human approval' },
+    { title: 'Adjudicate', detail: 'gate-approver triages gates (only if autonomy granted)' },
+    { title: 'Gate Review', detail: 'consolidate decisions; escalate to human; halt' },
   ],
 }
 
@@ -18,6 +19,9 @@ export const meta = {
 const goal =
   args && typeof args === 'object' ? args.goal : typeof args === 'string' ? args : null
 if (!goal) return { error: 'Provide args.goal (a string) — what to deliver.' }
+// Optional, human-granted autonomy policy for this run (scope + allowlist + spend cap).
+// If absent, the gate-approver escalates EVERYTHING (default-safe).
+const autonomy = args && typeof args === 'object' ? args.autonomy : null
 
 // ---- schemas (force structured output) ----
 const PLAN_SCHEMA = {
@@ -125,13 +129,62 @@ const integration = await agent(
   { label: 'integrate', phase: 'Integrate' },
 )
 
-// ---- Gate review (halt; never execute gated actions) ----
-phase('Gate Review')
 const gateRequests = work.flatMap((w) => (w.gateRequests || []).map((g) => ({ ...g, workstream: w.workstream })))
+
+// ---- Adjudicate (gate-approver — only if the human granted an autonomy policy) ----
+phase('Adjudicate')
+const ADJUDICATION_SCHEMA = {
+  type: 'object',
+  properties: {
+    decisions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          decision: { type: 'string', enum: ['approve', 'deny', 'escalate'] },
+          matchedPolicy: { type: 'string' },
+          reason: { type: 'string' },
+        },
+        required: ['id', 'decision', 'reason'],
+      },
+    },
+    summary: {
+      type: 'object',
+      properties: { approved: { type: 'number' }, denied: { type: 'number' }, escalated: { type: 'number' } },
+    },
+  },
+  required: ['decisions'],
+}
+
+let adjudication = null
+if (gateRequests.length && autonomy) {
+  adjudication = await agent(
+    `You are the SDLC Gate Approver. Adjudicate these gate requests under the human-granted run ` +
+      `autonomy policy. APPROVE only the reversible / non-prod / in-scope / rollback class on the ` +
+      `allowlist; DENY security or scope violations; ESCALATE everything high-risk, irreversible, ` +
+      `or ambiguous. Fail closed (default = escalate). Decide ONLY — do not execute. Follow ` +
+      `~/.claude/rules/workflow-gated-actions.md (§ Autonomous approval authority).\n\n` +
+      `Run autonomy policy: ${JSON.stringify(autonomy)}\n\n` +
+      `Gate requests: ${JSON.stringify(gateRequests).slice(0, 8000)}`,
+    { label: 'gate-approver', phase: 'Adjudicate', schema: ADJUDICATION_SCHEMA, agentType: 'sdlc-gate-approver' },
+  )
+  const c = (adjudication && adjudication.summary) || {}
+  log(`Adjudicated under granted autonomy: ${c.approved || 0} approved · ${c.denied || 0} denied · ${c.escalated || 0} escalated.`)
+} else if (gateRequests.length) {
+  log(`No autonomy policy granted → all ${gateRequests.length} gate(s) escalate to the human (default-safe).`)
+}
+
+// ---- Gate review (halt; the workflow executes NO gated actions) ----
+phase('Gate Review')
+const decisions =
+  (adjudication && adjudication.decisions) ||
+  gateRequests.map((g) => ({ id: g.action, decision: 'escalate', matchedPolicy: 'default-escalate', reason: 'no autonomy policy granted' }))
+const escalated = decisions.filter((d) => d.decision === 'escalate')
 log(
   gateRequests.length
-    ? `GATE REVIEW — ${gateRequests.length} action(s) require HUMAN approval. Halting by policy ` +
-        `(workflow-gated-actions): no commit/push/deploy/apply performed.`
+    ? `GATE REVIEW — ${escalated.length} of ${gateRequests.length} gate(s) require HUMAN approval. ` +
+        `Halting by policy: the workflow executes NO gated actions (approved ones run in the main session).`
     : 'No gated actions proposed by the architects.',
 )
 
@@ -141,9 +194,12 @@ return {
   workstreams: work.map((w) => ({ id: w.workstream, role: w.role, summary: w.summary, artifacts: w.artifacts || [] })),
   integration,
   gateRequests,
+  gateDecisions: decisions,
+  escalations: escalated,
   needsEngineers: work.flatMap((w) => w.needsEngineers || []),
   tokensSpent: budget.total ? budget.spent() : undefined,
   note:
-    'Autonomous phases complete in isolated worktrees. Review gateRequests; the human approves and ' +
-    'executes gated actions in the main session, or re-run with the next segment. Coordinators never auto-approve.',
+    'Autonomous phases done in isolated worktrees. The gate-approver triaged gates within the ' +
+    'human-granted autonomy (or escalated all if none granted); the workflow executes NO gated ' +
+    'actions — the human executes approved/escalated ones in the main session. Never auto-approved past policy.',
 }
