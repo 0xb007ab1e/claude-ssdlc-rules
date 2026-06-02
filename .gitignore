@@ -8,6 +8,7 @@
 !/skills/
 !/agents/
 !/workflows/
+!/hooks/
 
 # Belt-and-suspenders: never track these even if a rule above is loosened.
 .credentials.json
