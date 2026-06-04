@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -176,7 +177,10 @@ def extract_windows(usage: dict) -> list[dict]:
     """
     windows = []
     for name, value in usage.items():
-        if isinstance(value, dict) and "utilization" in value:
+        # A real usage window is a dict carrying a numeric utilization. Skip
+        # null/None utilization (e.g. inactive windows, or the extra_usage
+        # credit-balance object when disabled).
+        if isinstance(value, dict) and value.get("utilization") is not None:
             windows.append(
                 {
                     "name": name,
@@ -265,6 +269,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--org-id", default=os.environ.get("CLAUDE_ORG_ID"),
                         help="organization uuid (default: auto-discover; or CLAUDE_ORG_ID)")
     parser.add_argument("--session-key-file", help="path to a file containing the sessionKey value")
+    parser.add_argument("--from-browser", nargs="?", const="auto", metavar="BROWSER",
+                        help="locate+copy the sessionKey from a local browser first "
+                             "(runs extract_session_key.py; default 'auto')")
     parser.add_argument("--threshold", type=float, metavar="PCT",
                         help="exit code 2 if any window's utilization >= PCT")
     parser.add_argument("--watch", type=float, metavar="SECONDS",
@@ -292,10 +299,29 @@ def run_once(args: argparse.Namespace, cookie: str) -> int:
     return 0
 
 
+def refresh_key_from_browser(browser: str, out_path: str | None) -> None:
+    """Run the sibling extractor to copy the sessionKey from a local browser.
+
+    :raises UsageError: if the extractor is missing or fails.
+    """
+    extractor = Path(__file__).resolve().parent / "extract_session_key.py"
+    if not extractor.is_file():
+        raise UsageError(f"extractor not found at {extractor}")
+    cmd = [sys.executable, str(extractor), "--browser", browser]
+    if out_path:
+        cmd += ["--out", out_path]
+    proc = subprocess.run(cmd)
+    if proc.returncode != 0:
+        raise UsageError("could not extract a session key from the browser "
+                         "(see the error above)")
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns a process exit code (0 ok, 1 error, 2 threshold)."""
     args = build_parser().parse_args(argv)
     try:
+        if args.from_browser:
+            refresh_key_from_browser(args.from_browser, args.session_key_file)
         cookie = resolve_cookie(args.session_key_file)
     except UsageError as exc:
         print(f"error: {exc}", file=sys.stderr)

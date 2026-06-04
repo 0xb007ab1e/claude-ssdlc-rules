@@ -24,16 +24,39 @@ line, by calling claude.ai's internal usage endpoint with your authenticated
 In a browser logged into claude.ai: **DevTools → Application/Storage → Cookies →
 `https://claude.ai` → `sessionKey`**. The value looks like `sk-ant-sid01-…`.
 
-### 2. Provide it (pick one)
+### 2. Provide it
+
+**Easiest — auto-locate from your browser** (`extract_session_key.py`):
+
+```bash
+# Find the claude.ai sessionKey in a local browser and write the key file:
+python3 ~/.claude/scripts/extract_session_key.py
+
+# ...or let the monitor do it in one step (re-extract, then report):
+python3 ~/.claude/scripts/claude_usage.py --from-browser
+```
+
+This locates the cookie across Firefox/LibreWolf (plaintext) and
+Chrome/Chromium/Brave/Edge/Vivaldi (decrypting the Linux `v10`/`v11` scheme),
+copies the locked DB safely, and writes `~/.claude/.claude_session_key`
+(mode 0600). The value is **never printed** unless you pass `--stdout`. You must
+be logged into claude.ai in that browser. (`v11`/keyring cookies need the
+`secretstorage` pip package or the `secret-tool` CLI; macOS/Windows Chromium
+keyrings aren't handled — use Firefox or set the key manually there.)
+
+**Manual alternatives:**
 
 ```bash
 # Option A — environment variable (good for a shell session / cron)
 export CLAUDE_SESSION_KEY='sk-ant-sid01-...'
 
-# Option B — git-ignored file (default location; recommended)
+# Option B — git-ignored file (default location)
 install -m 600 /dev/null ~/.claude/.claude_session_key
 printf '%s' 'sk-ant-sid01-...' > ~/.claude/.claude_session_key
 ```
+
+Get the value manually from a logged-in browser: **DevTools → Application/Storage
+→ Cookies → `https://claude.ai` → `sessionKey`**.
 
 The file `~/.claude/.claude_session_key` is git-ignored (see `.gitignore`) so it
 is never committed. Treat the session key like a password — it grants access to
