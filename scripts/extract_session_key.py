@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Locate and copy the claude.ai ``sessionKey`` cookie from a local browser.
+"""Locate the claude.ai ``sessionKey`` cookie in a local browser.
 
-Finds the claude.ai ``sessionKey`` in your installed browsers and writes it to
-``~/.claude/.claude_session_key`` (mode 0600, git-ignored) so ``claude_usage.py``
-can use it. Supports:
+Primary use is as a *library*: ``claude_usage.py`` calls :func:`iter_candidates`
+to read the cookie **live, in memory, with no on-disk copy** (so a rotated
+cookie is always current). Run directly, it reports where the cookie was found
+and makes no copy unless you opt in with ``--out`` (write a stale-prone file) or
+``--stdout`` (print the value). Supports:
 
   * Firefox family (Firefox, ESR, LibreWolf) - cookies are plaintext SQLite.
   * Chromium family (Chrome, Chromium, Brave, Edge, Vivaldi) - cookie values are
@@ -43,7 +45,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-DEFAULT_OUT = Path.home() / ".claude" / ".claude_session_key"
 DEFAULT_HOST = "claude.ai"
 DEFAULT_COOKIE = "sessionKey"
 
@@ -121,17 +122,9 @@ def _query_cookie(db: str, table: str, host_col: str, name_col: str,
             pass
 
 
-# --------------------------------------------------------------------------- #
-# Firefox (plaintext)
-# --------------------------------------------------------------------------- #
-def from_firefox(globs: list[Path], host: str, cookie: str) -> str | None:
-    """Read a plaintext cookie value from any matching Firefox profile."""
-    for pattern in globs:
-        for db in sorted(glob.glob(str(pattern))):
-            value = _query_cookie(db, "moz_cookies", "host", "name", "value", host, cookie)
-            if value:
-                return value if isinstance(value, str) else value.decode("utf-8", "strict")
-    return None
+def _profile_label(db_path: str) -> str:
+    """Derive a short profile label from a cookie DB path."""
+    return Path(db_path).parent.name
 
 
 # --------------------------------------------------------------------------- #
@@ -204,48 +197,67 @@ def _decrypt_chromium(encrypted: bytes, label: str, app: str) -> str:
     return plaintext.decode("utf-8", "strict")
 
 
-def from_chromium(globs: list[Path], label: str, app: str,
-                  host: str, cookie: str) -> str | None:
-    """Read and decrypt a cookie value from any matching Chromium profile."""
-    for pattern in globs:
-        for db in sorted(glob.glob(str(pattern))):
-            encrypted = _query_cookie(db, "cookies", "host_key", "name",
-                                      "encrypted_value", host, cookie)
-            if encrypted:
-                return _decrypt_chromium(encrypted, label, app)
-    return None
-
-
 # --------------------------------------------------------------------------- #
 # Orchestration
 # --------------------------------------------------------------------------- #
-def locate(browser: str, host: str, cookie: str) -> tuple[str, str]:
-    """Find the cookie. Returns ``(browser_name, value)``.
+def iter_candidates(browser: str = "auto", host: str = DEFAULT_HOST,
+                    cookie: str = DEFAULT_COOKIE) -> list[tuple[str, str]]:
+    """Return every ``(label, value)`` candidate found across browsers/profiles.
 
-    ``browser`` is a specific name or ``"auto"`` to try all (Firefox first,
-    then Chromium). Raises :class:`ExtractError` if nothing is found.
+    ``browser`` is a specific name or ``"auto"`` (Firefox family first, then
+    Chromium family). Distinct values are de-duplicated. Chromium profiles that
+    cannot be decrypted (e.g. ``v11`` with no reachable keyring) are skipped
+    rather than aborting the whole scan. Raises :class:`ExtractError` only for
+    an unknown ``browser`` name.
     """
-    order: list[str]
-    if browser == "auto":
-        order = list(FIREFOX_BROWSERS) + list(CHROMIUM_BROWSERS)
-    else:
-        order = [browser]
+    order = (list(FIREFOX_BROWSERS) + list(CHROMIUM_BROWSERS)) if browser == "auto" else [browser]
+    known = list(FIREFOX_BROWSERS) + list(CHROMIUM_BROWSERS)
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
 
     for name in order:
         if name in FIREFOX_BROWSERS:
-            val = from_firefox(FIREFOX_BROWSERS[name]["globs"], host, cookie)
+            for pattern in FIREFOX_BROWSERS[name]["globs"]:
+                for db in sorted(glob.glob(str(pattern))):
+                    raw = _query_cookie(db, "moz_cookies", "host", "name", "value", host, cookie)
+                    if not raw:
+                        continue
+                    value = raw if isinstance(raw, str) else raw.decode("utf-8", "strict")
+                    if value and value not in seen:
+                        seen.add(value)
+                        out.append((f"{name}:{_profile_label(db)}", value))
         elif name in CHROMIUM_BROWSERS:
             cfg = CHROMIUM_BROWSERS[name]
-            val = from_chromium(cfg["globs"], cfg["label"], cfg["app"], host, cookie)
+            for pattern in cfg["globs"]:
+                for db in sorted(glob.glob(str(pattern))):
+                    encrypted = _query_cookie(db, "cookies", "host_key", "name",
+                                              "encrypted_value", host, cookie)
+                    if not encrypted:
+                        continue
+                    try:
+                        value = _decrypt_chromium(encrypted, cfg["label"], cfg["app"])
+                    except ExtractError:
+                        continue  # undecryptable profile - skip, keep scanning
+                    if value and value not in seen:
+                        seen.add(value)
+                        out.append((f"{name}:{_profile_label(db)}", value))
         else:
-            raise ExtractError(f"Unknown browser '{name}'. Choices: auto, "
-                               + ", ".join(list(FIREFOX_BROWSERS) + list(CHROMIUM_BROWSERS)))
-        if val:
-            return name, val
-    raise ExtractError(
-        f"Could not find the '{cookie}' cookie for {host} in any local browser. "
-        "Make sure you are logged into claude.ai in a supported browser."
-    )
+            raise ExtractError(f"Unknown browser '{name}'. Choices: auto, " + ", ".join(known))
+    return out
+
+
+def locate(browser: str, host: str, cookie: str) -> tuple[str, str]:
+    """Find the cookie. Returns the first ``(label, value)`` candidate.
+
+    Raises :class:`ExtractError` if nothing is found.
+    """
+    candidates = iter_candidates(browser, host, cookie)
+    if not candidates:
+        raise ExtractError(
+            f"Could not find the '{cookie}' cookie for {host} in any local browser. "
+            "Make sure you are logged into claude.ai in a supported browser."
+        )
+    return candidates[0]
 
 
 def write_key(value: str, out_path: Path) -> None:
@@ -268,11 +280,12 @@ def build_parser() -> argparse.ArgumentParser:
                              + ", ".join(list(FIREFOX_BROWSERS) + list(CHROMIUM_BROWSERS)))
     parser.add_argument("--host", default=DEFAULT_HOST, help="cookie host (default claude.ai)")
     parser.add_argument("--cookie", default=DEFAULT_COOKIE, help="cookie name (default sessionKey)")
-    parser.add_argument("--out", default=str(DEFAULT_OUT), type=Path,
-                        help=f"destination key file (default {DEFAULT_OUT})")
+    parser.add_argument("--out", type=Path, metavar="PATH",
+                        help="write a copy of the key to PATH (mode 0600). NOTE: a copy "
+                             "goes stale when the cookie rotates - prefer letting "
+                             "claude_usage.py read it live. Off by default.")
     parser.add_argument("--stdout", action="store_true",
-                        help="print the key value to stdout instead of writing the file "
-                             "(use with care - the value is a credential)")
+                        help="print the key value to stdout (use with care - it is a credential)")
     return parser
 
 
@@ -280,22 +293,36 @@ def main(argv: list[str] | None = None) -> int:
     """Entry point. Returns a process exit code (0 found, 1 error)."""
     args = build_parser().parse_args(argv)
     try:
-        browser, value = locate(args.browser, args.host, args.cookie)
+        candidates = iter_candidates(args.browser, args.host, args.cookie)
     except ExtractError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    if not candidates:
+        print(f"error: '{args.cookie}' for {args.host} not found in any local browser; "
+              "log into claude.ai first.", file=sys.stderr)
+        return 1
 
+    # --stdout: emit the first candidate's value (for piping). Opt-in.
     if args.stdout:
-        sys.stdout.write(value)
+        sys.stdout.write(candidates[0][1])
         if sys.stdout.isatty():
             sys.stdout.write("\n")
         return 0
 
-    write_key(value, args.out)
-    mode = oct(stat.S_IMODE(os.stat(args.out).st_mode))
-    preview = value[:13] + "..." if len(value) > 13 else "(short)"
-    print(f"found {args.cookie} in {browser}; wrote {args.out} (mode {mode}, "
-          f"len {len(value)}, starts {preview})")
+    # --out: write an explicit (stale-prone) copy. Opt-in.
+    if args.out:
+        write_key(candidates[0][1], args.out)
+        mode = oct(stat.S_IMODE(os.stat(args.out).st_mode))
+        print(f"found {args.cookie} in {candidates[0][0]}; wrote {args.out} (mode {mode})")
+        return 0
+
+    # Default: report where it was found, make NO copy.
+    print(f"found {args.cookie} for {args.host} in {len(candidates)} location(s) "
+          "(claude_usage.py reads these live - no copy made):")
+    for label, value in candidates:
+        preview = value[:13] + "..." if len(value) > 13 else "(short)"
+        print(f"  - {label}  (len {len(value)}, starts {preview})")
+    print("Use --stdout to print the value, or --out PATH to write a (stale-prone) copy.")
     return 0
 
 
