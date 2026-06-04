@@ -9,101 +9,118 @@ shows — session (5-hour) and weekly (7-day) limit utilization — from the com
 line, by calling claude.ai's internal usage endpoint with your authenticated
 `sessionKey` cookie.
 
-- **Portable:** Python 3.8+ standard library only. No `pip install`, no deps.
-  Linux / macOS / Windows.
+- **Portable:** Python 3.8+ standard library only for the core. No `pip install`.
 - **No HTML scraping:** hits the JSON endpoint the page itself uses
   (`/api/organizations/{uuid}/usage`).
-- **Secret-safe:** the session key comes from an env var or a git-ignored file,
-  never a CLI flag (which would leak into shell history / `ps`).
+- **Live creds, no copy:** the `sessionKey` is read **live from your browser at
+  request time** and used in memory only — never copied to disk, so a rotated
+  cookie is always current. If the cookie in hand fails auth, the next valid
+  candidate (another profile/browser, or a freshly rotated value) is tried
+  automatically.
 
 > ⚠️ claude.ai's internal endpoints are **undocumented** and may change or break
 > without notice. This is a convenience monitor, not a supported API.
 
-### 1. Get your session key
+### Quick start
 
-In a browser logged into claude.ai: **DevTools → Application/Storage → Cookies →
-`https://claude.ai` → `sessionKey`**. The value looks like `sk-ant-sid01-…`.
-
-### 2. Provide it
-
-**Easiest — auto-locate from your browser** (`extract_session_key.py`):
-
-```bash
-# Find the claude.ai sessionKey in a local browser and write the key file:
-python3 ~/.claude/scripts/extract_session_key.py
-
-# ...or let the monitor do it in one step (re-extract, then report):
-python3 ~/.claude/scripts/claude_usage.py --from-browser
-```
-
-This locates the cookie across Firefox/LibreWolf (plaintext) and
-Chrome/Chromium/Brave/Edge/Vivaldi (decrypting the Linux `v10`/`v11` scheme),
-copies the locked DB safely, and writes `~/.claude/.claude_session_key`
-(mode 0600). The value is **never printed** unless you pass `--stdout`. You must
-be logged into claude.ai in that browser. (`v11`/keyring cookies need the
-`secretstorage` pip package or the `secret-tool` CLI; macOS/Windows Chromium
-keyrings aren't handled — use Firefox or set the key manually there.)
-
-**Manual alternatives:**
-
-```bash
-# Option A — environment variable (good for a shell session / cron)
-export CLAUDE_SESSION_KEY='sk-ant-sid01-...'
-
-# Option B — git-ignored file (default location)
-install -m 600 /dev/null ~/.claude/.claude_session_key
-printf '%s' 'sk-ant-sid01-...' > ~/.claude/.claude_session_key
-```
-
-Get the value manually from a logged-in browser: **DevTools → Application/Storage
-→ Cookies → `https://claude.ai` → `sessionKey`**.
-
-The file `~/.claude/.claude_session_key` is git-ignored (see `.gitignore`) so it
-is never committed. Treat the session key like a password — it grants access to
-your account.
-
-### 3. Run
+Just log into claude.ai in a browser, then run it — credentials are found for
+you, live:
 
 ```bash
 python3 ~/.claude/scripts/claude_usage.py            # one-shot table
 python3 ~/.claude/scripts/claude_usage.py --json     # machine-readable
-python3 ~/.claude/scripts/claude_usage.py --watch 60 # poll every 60s
+python3 ~/.claude/scripts/claude_usage.py --watch 60 # live dashboard (re-reads creds each tick)
+python3 ~/.claude/scripts/claude_usage.py --threshold 80   # exit 2 if any window ≥ 80% (alerting)
 ```
 
-Example output:
+Example output (`creds <source>` shows which browser/profile was used):
 
 ```
-claude.ai usage  (org 1a2b3c4d...)  2026-06-04 14:02:11
-  five_hour        [########----------------]  34.0%   resets in   3h 20m  (2026-06-04 17:00)
-  seven_day        [##################------]  72.0%   resets in  2d 14h   (2026-06-07 04:00)
-  seven_day_opus   [####--------------------]  18.0%   resets in  2d 14h   (2026-06-07 04:00)
+claude.ai usage  (org 1a2b3c4d..., creds brave:Default)  2026-06-04 14:02:11
+  five_hour         [########----------------]  34.0%   resets in   3h 20m  (2026-06-04 17:00)
+  seven_day         [##################------]  72.0%   resets in  2d 14h   (2026-06-07 04:00)
+  seven_day_sonnet  [------------------------]   0.0%   resets in  2d 14h   (2026-06-07 04:00)
 ```
+
+### Where credentials come from
+
+Resolution order — the first that yields a candidate wins:
+
+1. `--session-key-file PATH` — read the sessionKey from a file you manage.
+2. `CLAUDE_COOKIE` env — a full `Cookie:` header string (advanced; lets you add
+   `cf_clearance` for a Cloudflare challenge).
+3. `CLAUDE_SESSION_KEY` env — just the sessionKey value.
+4. **live browser read (default)** — every installed browser logged into
+   claude.ai becomes a candidate; tried in order, first valid one used.
+   `--browser NAME` narrows to one.
+
+The live read uses `extract_session_key.py` (below). The only thing written to
+disk is a throwaway temp copy of the *locked cookie database* (deleted
+immediately) — never the credential itself.
+
+> The explicit sources (1–3) are deliberate overrides: if you set one and it's
+> invalid, the tool reports the failure rather than silently falling back to the
+> browser. Leave them unset for the always-current live-browser default.
 
 ### Options
 
 | Flag | Purpose |
 |---|---|
-| `--json` | Emit raw + parsed JSON instead of the table. |
-| `--watch SECONDS` | Poll repeatedly (floored at 5s) until `Ctrl-C`. |
-| `--threshold PCT` | Exit code **2** if any window's utilization ≥ `PCT` (for alerting). |
+| `--json` | Emit raw + parsed JSON (`org_id`, `source`, `raw`, `windows`). |
+| `--watch SECONDS` | Poll repeatedly (floored at 5s) until `Ctrl-C`; re-reads creds live each tick. |
+| `--threshold PCT` | Exit code **2** if any window's utilization ≥ `PCT`. |
+| `--browser NAME` | Restrict the live read to one browser (`auto` by default). |
 | `--org-id UUID` | Skip org auto-discovery (or set `CLAUDE_ORG_ID`). |
-| `--session-key-file PATH` | Read the sessionKey from a specific file. |
+| `--session-key-file PATH` | Read the sessionKey from a file instead of a browser. |
 | `--timeout SECONDS` | Per-request timeout (default 15). |
 
 Exit codes: `0` ok · `1` config/auth/network error · `2` threshold exceeded.
 
-### Cron / alerting example
+## `extract_session_key.py` — locate the sessionKey
+
+Used as a **library** by the monitor (`iter_candidates()`), and runnable on its
+own to see where your cookie lives. It finds the claude.ai `sessionKey` across:
+
+- **Firefox / LibreWolf** — plaintext `cookies.sqlite` (stdlib only).
+- **Chrome / Chromium / Brave / Edge / Vivaldi** — decrypts the Linux
+  `v10` (password `peanuts`) and `v11` (keyring "Safe Storage") AES-128-CBC
+  scheme, handling the Chromium ≥ M114 32-byte domain-hash prefix. Decryption
+  uses the `cryptography` package if present, else the `openssl` CLI.
+
+```bash
+python3 ~/.claude/scripts/extract_session_key.py            # report locations, NO copy
+python3 ~/.claude/scripts/extract_session_key.py --stdout   # print the value (credential!)
+python3 ~/.claude/scripts/extract_session_key.py --out FILE # write a (stale-prone) copy, opt-in
+```
+
+By default it makes **no copy** — it just reports which browsers/profiles hold a
+valid cookie. Notes:
+
+- `v11`/keyring cookies need the `secretstorage` pip package or the `secret-tool`
+  CLI, with an unlocked keyring.
+- macOS/Windows Chromium keyrings aren't handled — use Firefox there, or
+  `CLAUDE_SESSION_KEY`.
+
+## Headless / cron
+
+No browser at runtime? Provide the key via env (rotate it yourself):
 
 ```bash
 # Warn (non-zero exit) when any limit crosses 80%
-*/30 * * * * CLAUDE_SESSION_KEY="$(cat ~/.claude/.claude_session_key)" \
+*/30 * * * * CLAUDE_SESSION_KEY='sk-ant-sid01-...' \
   python3 ~/.claude/scripts/claude_usage.py --threshold 80 >/dev/null \
   || notify-send "Claude usage high"
 ```
 
-### Troubleshooting
+Get a value manually from a logged-in browser: **DevTools → Application/Storage →
+Cookies → `https://claude.ai` → `sessionKey`**. Treat it like a password.
 
-- **`Authentication failed (HTTP 401/403)`** — the sessionKey expired; get a
-  fresh one. Persistent `403` can mean a Cloudflare challenge: pass a full cookie
-  string (including `cf_clearance`) via `CLAUDE_COOKIE` instead of just the key.
-- **`got an HTML challenge/login page`** — same cause; refresh the cookie.
+## Troubleshooting
+
+- **`all credential candidates were rejected`** — the cookie(s) expired; open
+  claude.ai in your browser to refresh the session, then re-run.
+- **`got a non-JSON response (likely a login/challenge page)`** — same cause, or
+  a Cloudflare challenge: pass a full cookie (incl. `cf_clearance`) via
+  `CLAUDE_COOKIE`.
+- **`No AES backend available`** (Chromium decrypt) — install the `cryptography`
+  pip package or the `openssl` CLI.
