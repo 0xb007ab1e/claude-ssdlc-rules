@@ -9,9 +9,13 @@
 !/agents/
 !/workflows/
 !/hooks/
+!/scripts/
 
 # Belt-and-suspenders: never track these even if a rule above is loosened.
 .credentials.json
+.claude_session_key
+__pycache__/
+*.pyc
 history.jsonl
 *.log
 sessions/
