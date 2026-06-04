@@ -125,20 +125,28 @@ Cookies → `https://claude.ai` → `sessionKey`**. Treat it like a password.
 - **`No AES backend available`** (Chromium decrypt) — install the `cryptography`
   pip package or the `openssl` CLI.
 
-## `usage_guard.py` — pre-execution budget gate (5-hour window)
+## `usage_guard.py` — pre-execution budget gate (all limit windows)
 
-A synchronous Claude Code **`PreToolUse` hook** that checks the 5-hour-session
-utilization *before each tool call* and:
+A synchronous Claude Code **`PreToolUse` hook** that, *before each tool call*,
+checks utilization across **every** limit window the endpoint returns (5-hour
+session, 7-day weekly, per-model weekly, …) and acts on the **worst** one,
+naming the offending window(s) and their reset times:
 
 - **< 80% (warn):** allow silently.
-- **80–95%:** allow, but **notify** (desktop via `notify-send` + stderr),
-  rate-limited to once per 10 min.
-- **≥ 95% (stop):** **block** token-consuming tool calls (exit 2) and enter a
-  **safe stop** — write a resume checkpoint and notify. A small read-only
-  allowlist (`Read`, `Grep`, `Glob`, `TaskList`, …) stays permitted so the
-  session isn't bricked. `CLAUDE_USAGE_OVERRIDE=1` bypasses for one run.
-- **self-heal:** once the window resets (`resets_at` passes or utilization
-  drops below warn), the block lifts automatically and you're notified.
+- **any window 80–95%:** allow, but **notify** (desktop via `notify-send` +
+  stderr), naming the window(s) over warn; rate-limited to once per 10 min.
+- **any window ≥ 95% (stop):** **block** token-consuming tool calls (exit 2) and
+  enter a **safe stop** — write a resume checkpoint and notify, naming the
+  window(s) over stop. A small read-only allowlist (`Read`, `Grep`, `Glob`,
+  `TaskList`, …) stays permitted so the session isn't bricked.
+  `CLAUDE_USAGE_OVERRIDE=1` bypasses for one run.
+- **self-heal:** once the worst window falls back below warn (it reset), the
+  block lifts automatically and you're notified. (A *weekly* window over stop
+  keeps the block until that window resets — days, not hours — so the message
+  says which window and when; override is always available.)
+
+The thresholds (`CLAUDE_USAGE_WARN` / `CLAUDE_USAGE_STOP`) apply to every window.
+`usage_guard.py status` prints all windows with a bar, level, and reset time.
 
 Thresholds/behavior are env-tunable: `CLAUDE_USAGE_WARN` (80), `CLAUDE_USAGE_STOP`
 (95), `CLAUDE_USAGE_TTL` (60s; 15s when ≥ warn), `CLAUDE_USAGE_ALLOW` (extra

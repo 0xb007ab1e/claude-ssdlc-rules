@@ -1,47 +1,49 @@
 #!/usr/bin/env python3
-"""Pre-execution usage guard for claude.ai's 5-hour window.
+"""Pre-execution usage guard for claude.ai limit windows.
 
 Runs as a synchronous Claude Code ``PreToolUse`` hook: before each tool call it
-checks the 5-hour-session utilization (via ``claude_usage`` read live from the
-browser) and:
+checks utilization across **all** limit windows the usage endpoint returns
+(5-hour session, 7-day weekly, per-model weekly, etc. — read live from the
+browser via ``claude_usage``) and acts on the **worst** one:
 
   * below WARN  -> allow silently.
-  * WARN..STOP  -> allow, but notify (desktop + stderr), rate-limited.
+  * WARN..STOP  -> allow, but notify (desktop + stderr), naming the window(s)
+                   that crossed WARN and when each resets. Rate-limited.
   * >= STOP     -> BLOCK token-consuming tool calls (exit 2) and enter a
-                   "safe stop": write a resume checkpoint and notify. A small
-                   read-only allowlist stays permitted so the session isn't
-                   bricked. Set CLAUDE_USAGE_OVERRIDE=1 to bypass for one run.
+                   "safe stop": write a resume checkpoint and notify, naming the
+                   window(s) over STOP. A small read-only allowlist stays
+                   permitted. Set CLAUDE_USAGE_OVERRIDE=1 to bypass one run.
 
-Self-healing resume: once the 5-hour window resets (``resets_at`` passes, or
-utilization falls back below WARN), the block lifts automatically, any system
-crons we paused are re-enabled, and you're notified that capacity is back.
+Note a weekly window over STOP keeps the block until that window resets (days),
+not just hours — the notification/stderr say which window and when, and override
+is always available.
 
-This file is also a small CLI for humans:
+Self-healing resume: once the worst window falls back below WARN (its window
+reset), the block lifts automatically and you're notified capacity is back.
 
-    usage_guard.py status        # show current state
+CLI:
+    usage_guard.py status        # show every window + overall state
     usage_guard.py refresh       # force a fresh reading
     usage_guard.py gate          # the hook entry (reads PreToolUse JSON on stdin)
     usage_guard.py checkpoint    # snapshot in-progress/queued jobs now
-    usage_guard.py resume        # clear the block, re-enable paused crons, notify
+    usage_guard.py resume        # clear the block, notify
     usage_guard.py install       # wire the PreToolUse hook into settings.json (GATED)
     usage_guard.py uninstall     # remove the hook from settings.json
 
 Tunables (env vars):
-    CLAUDE_USAGE_WARN     warn threshold %        (default 80)
-    CLAUDE_USAGE_STOP     stop/block threshold %  (default 95)
-    CLAUDE_USAGE_TTL      cache seconds           (default 60; 15 when >= WARN)
+    CLAUDE_USAGE_WARN     warn threshold %  applied to every window (default 80)
+    CLAUDE_USAGE_STOP     stop threshold %  applied to every window (default 95)
+    CLAUDE_USAGE_TTL      cache seconds     (default 60; 15 when any window >= WARN)
     CLAUDE_USAGE_OVERRIDE "1" to never block (one-run bypass)
     CLAUDE_USAGE_ALLOW    extra comma-separated tool names always allowed at STOP
 
-Design notes / honest limits:
+Honest limits:
   * Utilization is a percentage + reset time, NOT a token count, so "will this
-    job finish?" is a HEURISTIC (headroom + reset proximity), not exact math.
+    job finish?" is a HEURISTIC (the threshold), not exact math.
   * A hook cannot freeze an in-flight model turn; blocking the next tool call is
-    the stop mechanism. In-session Tasks/Workflows/crons are halted by that
-    block and recorded in the checkpoint; durable resume of a CLOSED session
-    needs the opt-in system-cron (install --system-cron) — and auto-launching
-    fresh AI work is deliberately NOT automatic (it would spend tokens and act
-    autonomously). Fail-open: if usage can't be read, the gate ALLOWS (warns).
+    the stop mechanism. In-session Tasks/Workflows/crons are halted by the block
+    and recorded in the checkpoint; durable resume of a CLOSED session is
+    best-effort. Fail-open: if usage can't be read, the gate ALLOWS (warns).
 """
 
 from __future__ import annotations
@@ -99,12 +101,14 @@ def _now() -> float:
 
 
 # --------------------------------------------------------------------------- #
-# Usage reading (reuses claude_usage as a library)
+# Usage reading (reuses claude_usage as a library) — ALL windows
 # --------------------------------------------------------------------------- #
-def read_five_hour(timeout: float = 8.0) -> tuple[float, str | None]:
-    """Return ``(utilization, resets_at)`` for the 5-hour window.
+def read_windows(timeout: float = 8.0) -> list[dict]:
+    """Return all active usage windows ``[{name, utilization, resets_at}, ...]``.
 
-    Raises :class:`RuntimeError` if usage cannot be read (caller fails open).
+    Reads live from the browser (no copy) and falls through credential
+    candidates on auth failure. Raises :class:`RuntimeError` if usage cannot be
+    read (caller fails open).
     """
     import claude_usage as cu
 
@@ -120,34 +124,41 @@ def read_five_hour(timeout: float = 8.0) -> tuple[float, str | None]:
                 if exc.auth:
                     continue
                 raise RuntimeError(str(exc)) from exc
-            window = usage.get("five_hour") or {}
-            util = window.get("utilization")
-            if util is None:
-                raise RuntimeError("no five_hour utilization in response")
-            return float(util), window.get("resets_at")
+            windows = cu.extract_windows(usage)
+            if not windows:
+                raise RuntimeError("no usage windows in response")
+            return windows
         raise RuntimeError(f"all credentials rejected ({last})")
     except cu.UsageError as exc:  # candidate resolution failed
         raise RuntimeError(str(exc)) from exc
 
 
+def _max_util(windows: list[dict]) -> tuple[float | None, str | None, str | None]:
+    """Return ``(max_utilization, window_name, resets_at)`` across windows."""
+    numeric = [w for w in windows if isinstance(w.get("utilization"), (int, float))]
+    if not numeric:
+        return None, None, None
+    worst = max(numeric, key=lambda w: w["utilization"])
+    return float(worst["utilization"]), worst.get("name"), worst.get("resets_at")
+
+
 def refresh_state(force: bool = False) -> dict:
     """Refresh cached usage if stale (or ``force``); return the state dict."""
     state = _load_state()
-    util = state.get("utilization")
+    cur_max, _, _ = _max_util(state.get("windows") or [])
     ttl = float(os.environ.get("CLAUDE_USAGE_TTL", "60"))
-    if util is not None and util >= WARN:
+    if cur_max is not None and cur_max >= WARN:
         ttl = min(ttl, 15.0)
     fresh = state.get("fetched_at", 0) + ttl > _now()
     if fresh and not force:
         return state
 
     try:
-        util, resets_at = read_five_hour()
-        state.update({"utilization": util, "resets_at": resets_at,
-                      "fetched_at": _now(), "read_error": None})
+        state["windows"] = read_windows()
+        state["read_error"] = None
     except RuntimeError as exc:
         state["read_error"] = str(exc)
-        state["fetched_at"] = _now()  # don't hammer on persistent failure
+    state["fetched_at"] = _now()  # don't hammer on persistent failure
     _save_state(state)
     return state
 
@@ -164,10 +175,20 @@ def _parse_iso(ts: str | None) -> datetime | None:
         return None
 
 
-def _window_reset(resets_at: str | None) -> bool:
-    """True if the reset timestamp is in the past (window has rolled over)."""
-    target = _parse_iso(resets_at)
-    return target is not None and target <= datetime.now(timezone.utc)
+def _when(resets_at: str | None) -> str:
+    """Human local time for a reset timestamp."""
+    dt = _parse_iso(resets_at)
+    return dt.astimezone().strftime("%b %d %H:%M") if dt else "?"
+
+
+def offenders(windows: list[dict], threshold: float) -> str:
+    """Summarize windows at/above ``threshold`` as 'name pct% (resets when)'."""
+    parts = []
+    for w in sorted(windows, key=lambda w: -(w.get("utilization") or 0)):
+        u = w.get("utilization")
+        if isinstance(u, (int, float)) and u >= threshold:
+            parts.append(f"{w['name']} {u:.0f}% (resets {_when(w.get('resets_at'))})")
+    return "; ".join(parts)
 
 
 def notify(title: str, body: str) -> None:
@@ -201,20 +222,13 @@ def allow_set() -> set[str]:
 # Job checkpoint (best-effort snapshot of on-disk job state)
 # --------------------------------------------------------------------------- #
 def checkpoint(reason: str = "manual") -> Path:
-    """Snapshot known on-disk jobs so work can be picked up after reset.
-
-    Captures background-task and job directories, workflow scripts, and the
-    current usage reading. In-session crons (CronList) and live Workflow runs
-    are only fully visible to the agent, so this records what is on disk and
-    notes the boundary.
-    """
+    """Snapshot known on-disk jobs + the full window readout for resume."""
     GUARD_DIR.mkdir(parents=True, exist_ok=True)
     state = _load_state()
     snap = {
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "reason": reason,
-        "utilization": state.get("utilization"),
-        "resets_at": state.get("resets_at"),
+        "windows": state.get("windows") or [],
         "tasks": [], "jobs": [], "workflows": [],
         "note": "In-session crons (CronList) and live Workflow runs must be "
                 "captured by the agent; on-disk state recorded below.",
@@ -230,40 +244,28 @@ def checkpoint(reason: str = "manual") -> Path:
                 })
     jobs_dir = CLAUDE_HOME / "jobs"
     if jobs_dir.is_dir():
-        for d in sorted(jobs_dir.iterdir()):
-            if d.is_dir():
-                snap["jobs"].append(d.name)
+        snap["jobs"] = sorted(d.name for d in jobs_dir.iterdir() if d.is_dir())
     wf_dir = CLAUDE_HOME / "workflows"
     if wf_dir.is_dir():
         snap["workflows"] = sorted(p.name for p in wf_dir.glob("*.js"))
 
     path = GUARD_DIR / f"checkpoint-{int(_now())}.json"
     path.write_text(json.dumps(snap, indent=2), encoding="utf-8")
-    latest = GUARD_DIR / "checkpoint-latest.json"
-    latest.write_text(json.dumps(snap, indent=2), encoding="utf-8")
+    (GUARD_DIR / "checkpoint-latest.json").write_text(json.dumps(snap, indent=2), encoding="utf-8")
     return path
 
 
-# --------------------------------------------------------------------------- #
-# Paused-cron bookkeeping (system crontab entries we disable/enable)
-# --------------------------------------------------------------------------- #
-PAUSED_CRONS = GUARD_DIR / "paused-crons.txt"
-
-
 def resume(triggered_by: str = "manual") -> None:
-    """Lift the block, re-enable paused crons, and notify that capacity is back."""
+    """Lift the block and notify that capacity is back."""
     state = _load_state()
     was_blocked = bool(state.get("blocked_since"))
     state["blocked_since"] = None
     state["block_checkpoint"] = None
     _save_state(state)
-    if PAUSED_CRONS.exists():
-        # Re-enabling system crons is left to the install --system-cron flow;
-        # here we just clear the marker. (Kept minimal and reversible.)
-        PAUSED_CRONS.unlink()
     if was_blocked or triggered_by != "manual":
         notify("Claude usage: capacity restored",
-               "5-hour window reset. Block lifted; paused work can resume.")
+               "A limit window reset below the warn level. Block lifted; "
+               "paused work can resume.")
 
 
 # --------------------------------------------------------------------------- #
@@ -271,7 +273,6 @@ def resume(triggered_by: str = "manual") -> None:
 # --------------------------------------------------------------------------- #
 def gate(argv: list[str]) -> int:
     """PreToolUse entry. Reads the hook JSON on stdin; returns 0 allow / 2 block."""
-    # Parse the hook payload (best-effort; never fail the session on bad input).
     tool_name = ""
     try:
         raw = sys.stdin.read() if not sys.stdin.isatty() else ""
@@ -284,16 +285,16 @@ def gate(argv: list[str]) -> int:
         return 0
 
     state = refresh_state()
-    util = state.get("utilization")
+    windows = state.get("windows") or []
+    max_util, worst_name, worst_resets = _max_util(windows)
 
-    # Self-heal: window rolled over -> clear any block and welcome back.
-    if state.get("blocked_since") and (_window_reset(state.get("resets_at"))
-                                       or classify(util) == "ok"):
+    # Self-heal: worst window fell back below WARN -> clear any block.
+    if state.get("blocked_since") and (max_util is None or max_util < WARN):
         resume(triggered_by="self-heal")
         state = _load_state()
 
-    # Fail open: if we have no reading at all, allow but warn once.
-    if util is None:
+    # Fail open: no reading at all -> allow but warn once.
+    if max_util is None:
         if state.get("read_error") and _now() - state.get("warn_no_read_at", 0) > NOTIFY_EVERY:
             state["warn_no_read_at"] = _now()
             _save_state(state)
@@ -301,35 +302,32 @@ def gate(argv: list[str]) -> int:
                    f"Could not read usage ({state['read_error']}); not gating.")
         return 0
 
-    level = classify(util)
-    resets = _parse_iso(state.get("resets_at"))
-    when = resets.astimezone().strftime("%H:%M") if resets else "?"
+    level = classify(max_util)
 
     if level == "warn":
         if _now() - state.get("notified_at", 0) > NOTIFY_EVERY:
             state["notified_at"] = _now()
             _save_state(state)
             notify("Claude usage approaching limit",
-                   f"5-hour window at {util:.0f}% (warn {WARN:.0f}%), resets ~{when}.")
+                   f"warn {WARN:.0f}% crossed — {offenders(windows, WARN)}.")
         return 0
 
     if level == "stop":
-        # Enter / maintain safe-stop.
         if not state.get("blocked_since"):
             state["blocked_since"] = _now()
-            ckpt = checkpoint(reason=f"stop at {util:.0f}%")
+            ckpt = checkpoint(reason=f"stop: {offenders(windows, STOP)}")
             state["block_checkpoint"] = str(ckpt)
             _save_state(state)
-            notify("Claude usage: STOP — token budget low",
-                   f"5-hour window at {util:.0f}% (>= {STOP:.0f}%). Blocking new "
-                   f"tool calls; resets ~{when}. Checkpoint saved.")
+            notify("Claude usage: STOP — budget exhausted",
+                   f"stop {STOP:.0f}% crossed — {offenders(windows, STOP)}. "
+                   "Blocking new tool calls. Checkpoint saved.")
         if tool_name in allow_set():
             return 0  # read-only tool: keep the session usable
         sys.stderr.write(
-            f"BLOCKED by usage-guard: 5-hour usage {util:.0f}% >= stop {STOP:.0f}%. "
-            f"Window resets ~{when}; the block self-clears then. A checkpoint was "
-            f"saved to {state.get('block_checkpoint')}. To proceed anyway, re-run "
-            f"with CLAUDE_USAGE_OVERRIDE=1.\n"
+            f"BLOCKED by usage-guard: {offenders(windows, STOP)} (>= stop {STOP:.0f}%). "
+            f"The block self-clears when the worst window ({worst_name}) resets "
+            f"~{_when(worst_resets)}. Checkpoint: {state.get('block_checkpoint')}. "
+            f"To proceed anyway, re-run with CLAUDE_USAGE_OVERRIDE=1.\n"
         )
         return 2
 
@@ -339,20 +337,32 @@ def gate(argv: list[str]) -> int:
 # --------------------------------------------------------------------------- #
 # status
 # --------------------------------------------------------------------------- #
+def _bar(pct: float, width: int = 20) -> str:
+    pct = max(0.0, min(100.0, float(pct)))
+    filled = int(round(pct / 100 * width))
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+
 def cmd_status() -> int:
-    """Print the current usage/guard state."""
+    """Print every usage window and the overall guard state."""
     state = refresh_state(force=True)
-    util = state.get("utilization")
-    if util is None:
+    windows = state.get("windows") or []
+    if not windows:
         print(f"usage-guard: no reading ({state.get('read_error')})")
         return 1
-    resets = _parse_iso(state.get("resets_at"))
-    when = resets.astimezone().strftime("%Y-%m-%d %H:%M") if resets else "?"
-    print(f"5-hour window: {util:.1f}%  [{classify(util).upper()}]  "
-          f"(warn {WARN:.0f} / stop {STOP:.0f})  resets {when}")
+    max_util, worst, _ = _max_util(windows)
+    print(f"overall: {max_util:.1f}% [{classify(max_util).upper()}] worst={worst}  "
+          f"(warn {WARN:.0f} / stop {STOP:.0f}, applied to every window)")
+    name_w = max(len(w["name"]) for w in windows)
+    for w in sorted(windows, key=lambda w: -(w.get("utilization") or 0)):
+        u = w.get("utilization")
+        lvl = classify(u).upper() if isinstance(u, (int, float)) else "—"
+        pct = float(u) if isinstance(u, (int, float)) else 0.0
+        print(f"  {w['name']:<{name_w}}  {_bar(pct)} {pct:5.1f}%  [{lvl:<4}]  "
+              f"resets {_when(w.get('resets_at'))}")
     if state.get("blocked_since"):
-        print(f"  BLOCKED since {datetime.fromtimestamp(state['blocked_since']).strftime('%H:%M:%S')}; "
-              f"checkpoint {state.get('block_checkpoint')}")
+        since = datetime.fromtimestamp(state["blocked_since"]).strftime("%H:%M:%S")
+        print(f"  BLOCKED since {since}; checkpoint {state.get('block_checkpoint')}")
     return 0
 
 
