@@ -124,3 +124,39 @@ Cookies → `https://claude.ai` → `sessionKey`**. Treat it like a password.
   `CLAUDE_COOKIE`.
 - **`No AES backend available`** (Chromium decrypt) — install the `cryptography`
   pip package or the `openssl` CLI.
+
+## `usage_guard.py` — pre-execution budget gate (5-hour window)
+
+A synchronous Claude Code **`PreToolUse` hook** that checks the 5-hour-session
+utilization *before each tool call* and:
+
+- **< 80% (warn):** allow silently.
+- **80–95%:** allow, but **notify** (desktop via `notify-send` + stderr),
+  rate-limited to once per 10 min.
+- **≥ 95% (stop):** **block** token-consuming tool calls (exit 2) and enter a
+  **safe stop** — write a resume checkpoint and notify. A small read-only
+  allowlist (`Read`, `Grep`, `Glob`, `TaskList`, …) stays permitted so the
+  session isn't bricked. `CLAUDE_USAGE_OVERRIDE=1` bypasses for one run.
+- **self-heal:** once the window resets (`resets_at` passes or utilization
+  drops below warn), the block lifts automatically and you're notified.
+
+Thresholds/behavior are env-tunable: `CLAUDE_USAGE_WARN` (80), `CLAUDE_USAGE_STOP`
+(95), `CLAUDE_USAGE_TTL` (60s; 15s when ≥ warn), `CLAUDE_USAGE_ALLOW` (extra
+always-allowed tools).
+
+```bash
+python3 ~/.claude/scripts/usage_guard.py status      # current state + level
+python3 ~/.claude/scripts/usage_guard.py checkpoint  # snapshot jobs now
+python3 ~/.claude/scripts/usage_guard.py install     # arm the PreToolUse hook (edits settings.json; backs it up)
+python3 ~/.claude/scripts/usage_guard.py uninstall   # disarm
+```
+
+**Honest limits.** Utilization is a percentage + reset time, not a token count,
+so "will this job finish?" is a heuristic (the threshold), not exact accounting.
+A hook can't freeze an in-flight turn — blocking the *next* tool call is the stop
+mechanism; in-session Tasks/Workflows/crons are halted by the block and recorded
+in the checkpoint. Durable resume of a **closed** session needs a local
+system-cron (opt-in), and auto-launching fresh AI work is intentionally manual
+(it spends tokens and acts autonomously). If usage can't be read (expired cookie
+/ Cloudflare), the gate **fails open** (allows + warns) so it never bricks your
+tools.
