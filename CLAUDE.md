@@ -30,6 +30,13 @@ explicitly and giving a reason; it may never relax the *non-negotiable mandates*
   reviewed and tested like any other — never trusted blindly. Confirm it compiles, passes
   the gates, and contains no insecure patterns or hallucinated/typosquatted dependencies
   before it lands.
+- **Accessible by default.** Every user interface is built for accessibility from the start,
+  not retrofitted: support assistive technologies (screen readers, switch/voice control) with
+  semantic structure + correct ARIA; full keyboard operability with visible focus; intuitive,
+  standardized, consistent navigation (landmarks, skip links, logical focus order); and honor
+  user preferences (color scheme, reduced motion). Target **WCAG 2.2 AA** as the floor — a11y
+  is part of "done," verified by automated + manual (keyboard + screen-reader) checks
+  (`@rules/topic-accessibility.md`).
 
 ---
 
@@ -146,6 +153,11 @@ Example — a Python web service handling personal data:
 ### Universal workflow modules (loaded globally here)
 @rules/workflow-git.md
 @rules/workflow-secrets.md
+@rules/workflow-knowledge-base.md
+
+### Universal topic modules (loaded globally here)
+@rules/topic-accessibility.md   # a11y is a non-negotiable mandate (§1) — applies to every UI
+@rules/topic-tailnet-dev-access.md   # dev/preview services: tailnet-only at <host>:<port>, never public
 
 ### Module catalog (import per project as needed)
 **Languages:** `lang-python` · `lang-typescript` · `lang-go` · `lang-rust` · `lang-java`
@@ -167,11 +179,12 @@ Example — a Python web service handling personal data:
 · `topic-concurrency` · `topic-state-management` · `topic-numeric-correctness`
 · `topic-dependency-injection` · `topic-architecture-patterns` · `topic-anti-patterns`
 · `topic-token-optimization` · `topic-api-consumption` · `topic-notifications`
-· `topic-migration` · `topic-local-dev`
+· `topic-migration` · `topic-local-dev` · `topic-tailnet-dev-access`
 **Workflows:** `workflow-git` · `workflow-cicd` · `workflow-threat-model`
 · `workflow-secrets` · `workflow-vuln-mgmt` · `workflow-cve-management` · `workflow-code-review`
 · `workflow-release` · `workflow-incident-response` · `workflow-data-lifecycle`
 · `workflow-runbooks` · `workflow-bootstrap` · `workflow-gated-actions`
+· `workflow-knowledge-base` (global)
 **Templates:** `templates/python-web-service` · `templates/typescript-service`
 · `templates/cli-tool` · `templates/library` · `templates/ai-llm-service`
 · `templates/web-frontend-spa` · `templates/serverless-function` · `templates/data-pipeline`
@@ -247,3 +260,53 @@ A change is done only when **all** of these hold (the granular rules expand each
   and at-least-once delivery (`@rules/topic-reliability.md`, `@rules/topic-event-driven.md`).
 - **Tenant** — an isolated customer/account in shared infrastructure
   (`@rules/topic-multi-tenancy.md`).
+  
+  
+  ## Local tooling — cot (out-of-band execution)
+  `cot` runs commands this session can't (network/secrets/toolchain/sudo) in isolated, provisioned,
+  audited sessions, plus safety utilities. Prefer it over fighting the sandbox:
+  - blocked/elevated command → `cot exec --session <default|root-box|sudo-box> '<cmd>'` (needs cotd)
+  - egress-limited run → `cot netjail run --allow <host> -- <cmd>` ; recoverable delete → `cot trash put`
+  - scrub secrets → `… | cot redact` ; vet installs → `cot vet '<cmd>'` ; snapshot/undo → `cot capsule`
+  Run `cot <tool> --help`.
+
+  ## Local tooling — claude-sessions (this session runs inside a tmux session fleet)
+  This Claude is (typically) one window of a persistent **tmux** session managed by the
+  `claude-sessions` toolkit — one Claude per window, drivable from the user's phone over Tailscale.
+  A family of `claude-*` commands is on PATH; most manage the fleet for the *human*, but two matter to
+  Claude directly: **`claude-ask`** (surface an interactive prompt) and **`claude-shell`** (a shell for
+  what Claude can't run). `claude-ls` shows the fleet; full reference: the repo's `docs/index.html`.
+
+  **Interactive prompts → `claude-ask`.** When a command needs an interactive answer this session has
+  no TTY to give — an `ssh-add`/GPG passphrase, `sudo`, an OTP/2FA code, an interactive login — it
+  hangs forever. Don't background it, pipe the secret, or disable the control (e.g. don't turn off
+  commit signing). Surface the prompt to the human — it runs in a real tmux window the user types or
+  pastes into (locally or from their phone via `claude-session -g`):
+  - run + wait + auto-close on success → `claude-ask run -wc -t <secs> -m '<what to do>' [-e VAR=VAL] -- <cmd ABS-args>`
+  - poll / close a window started earlier → `claude-ask wait <@win> [-c]` · `claude-ask close <@win>`
+  - paste a SECRET off-argv → `printf %s "$VAL" | claude-ask send -F 0 <@win>`
+  Never type/paste the user's secret yourself — surface it and let them answer. Once a key is in an
+  ssh-agent, reuse its socket to sign: `SSH_AUTH_SOCK=<sock> git commit …`. `claude-ask -h`.
+
+  **Shell for what Claude can't run → `claude-shell [-c DIR|-D] [-n NAME]`** opens a grouped
+  interactive login shell window (sudo, TUIs, logins) beside this instance — for a non-secret `! …`
+  command the user runs by hand. (For a prompt that needs an *answer*, prefer `claude-ask`.)
+
+  **Fleet management (mostly the human's, but invocable):**
+  - `cj` — join the session (reuse idle window / open new); `-a` auto-name, `-n NAME`, `-M model`, `-E effort`.
+  - `claude-ls [--prune N|--clean-backups]` — list active + closed instances (colour, status badges).
+  - `claude-pick` — picker: switch an active instance / reopen a closed one.
+  - `claude-new [-m new|resume|continue] [-c DIR|-D] [-n NAME] [-M MODEL] [-E EFFORT] [-i ID]` — open an instance.
+  - `claude-restore` / `claude-restore-all` — reopen a closed instance / the last session's instances.
+  - `claude-cd` — move this instance to another dir (relaunch + resume); `claude-rename [NAME]` — rename it.
+  - `claude-model` — pick model/effort then open; `claude-cost` — token usage + est. cost per instance.
+  - `claude-session …` — general launcher / custom multi-window layouts (`-g` = grouped phone attach).
+  - `claude-notify` — attention push (desktop/ntfy/pushover); `claude-status` — status-bar summary.
+  (`claude-hook`, `claude-popup`, `claude-snapshot`, `claude-watchdog` are internal hooks — not run by hand.)
+
+  ## Interaction — commands the user runs
+  When handing the user a shell command to run themselves (e.g. via the `!` prefix), output it on a
+  SINGLE line with no line breaks. Wrapped/multi-line commands get split by the shell on paste — a
+  newline inside a command runs a fragment as its own command (e.g. a wrapped `ssh-add ~/.ssh/key`
+  split so the key path executed standalone → "Permission denied"). Keep it one line even if long; if
+  it's genuinely too long, write a script instead.

@@ -129,12 +129,14 @@ Import paths use `~` (e.g. `@~/.claude/rules/lang-python.md`). Imports nest up t
 | `topic-notifications` | Email/SMS/push — deliverability (SPF/DKIM/DMARC), idempotent sends, consent, no PII |
 | `topic-migration` | Legacy migration — strangler-fig, parallel-run, anti-corruption layer, safe data migration |
 | `topic-local-dev` | Reproducible local setup — devcontainers, task runner, pre-commit hooks, safe defaults |
+| `topic-tailnet-dev-access` | Dev/preview services reachable at `<host>:<port>` over the tailnet (private), never public *(global)* |
 
 ### Workflows (`workflow-*`)
 | Module | Scope |
 |---|---|
 | `workflow-git` | Trunk-based branching, signed commits, mandatory PR review *(global)* |
 | `workflow-secrets` | Secret storage, rotation, detection *(global)* |
+| `workflow-knowledge-base` | How agents consult/contribute the shared ground-truth KB (MCP tools, gated promotion) *(global)* |
 | `workflow-cicd` | CI/CD security gates (SAST/DAST/SCA/secret-scan, SBOM, signing) |
 | `workflow-threat-model` | STRIDE threat modeling at design time |
 | `workflow-vuln-mgmt` | Vulnerability monitoring, remediation SLAs, disclosure |
