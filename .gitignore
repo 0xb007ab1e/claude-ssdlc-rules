@@ -11,6 +11,7 @@
 !/workflows/
 !/hooks/
 !/scripts/
+!/docs/
 
 # Belt-and-suspenders: never track these even if a rule above is loosened.
 .credentials.json
