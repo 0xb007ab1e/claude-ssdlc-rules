@@ -26,6 +26,25 @@ explicitly and giving a reason; it may never relax the *non-negotiable mandates*
 - **No secrets in code or VCS.** Secrets come from a vault/KMS or injected env at runtime.
 - **Security gates are merge-blocking.** A change that fails SAST/SCA/secret-scan/tests
   is not "done" and must not merge.
+- **CI/CD minimization — local-first, no unauthorized pipelines (cost/burn control).** Do
+  **not** add, enable, or trigger GitHub Actions (or any hosted CI/CD) pipelines unless *you
+  authored them* or the user has *explicitly authorized* them; **no scheduled/cron workflows
+  without explicit authorization.** Run all CI/CD preliminary checks — lint, format, type-check,
+  tests, build, SAST/SCA/secret-scan — **locally first** and confirm green **before pushing to
+  GitHub**. A push triggers billed hosted runners, so local validation is the default gate;
+  hosted CI runs only for authored/authorized pipelines. This does **not** weaken the
+  merge-blocking gate above — the same gates must pass; they just run locally by default to
+  conserve Actions minutes / token burn. Adding a new workflow, enabling a disabled one, or
+  introducing a schedule is a **gated action** requiring explicit approval
+  (`@rules/workflow-gated-actions.md`, `@rules/workflow-cicd.md`).
+  - **ACTIVE ACCOUNT-WIDE HOLD (until further notice — set 2026-09-11, billing/spend
+    limit).** Hosted CI/CD is **deferred on every project** while the GitHub Actions
+    spending limit is unresolved: build and run all gates **locally only**; do not
+    enable, trigger, or schedule hosted runs on any repo. Workflows already disabled
+    stay disabled. **Re-enabling is selective and explicit** — the user re-enables
+    specific projects one at a time by name; **never bulk-enable, never "all at
+    once,"** and never re-enable a project without the user naming it. This hold
+    stays in force until the user says billing is resolved and lifts it.
 - **Verify generated & third-party code.** AI-generated, copied, or dependency code is
   reviewed and tested like any other — never trusted blindly. Confirm it compiles, passes
   the gates, and contains no insecure patterns or hallucinated/typosquatted dependencies
@@ -154,10 +173,12 @@ Example — a Python web service handling personal data:
 @rules/workflow-git.md
 @rules/workflow-secrets.md
 @rules/workflow-knowledge-base.md
+@rules/workflow-issue-tracking.md   # track dev with issues; external contributions into the review pipeline
 
 ### Universal topic modules (loaded globally here)
 @rules/topic-accessibility.md   # a11y is a non-negotiable mandate (§1) — applies to every UI
 @rules/topic-tailnet-dev-access.md   # dev/preview services: tailnet-only at <host>:<port>, never public
+@rules/topic-docs-currency.md   # living docs (README/docs/FAQ/CHANGELOG) updated in the same PR as the change
 
 ### Module catalog (import per project as needed)
 **Languages:** `lang-python` · `lang-typescript` · `lang-go` · `lang-rust` · `lang-java`
@@ -179,12 +200,13 @@ Example — a Python web service handling personal data:
 · `topic-concurrency` · `topic-state-management` · `topic-numeric-correctness`
 · `topic-dependency-injection` · `topic-architecture-patterns` · `topic-anti-patterns`
 · `topic-token-optimization` · `topic-api-consumption` · `topic-notifications`
-· `topic-migration` · `topic-local-dev` · `topic-tailnet-dev-access`
+· `topic-migration` · `topic-local-dev` · `topic-tailnet-dev-access` (global) · `topic-docs-currency` (global)
 **Workflows:** `workflow-git` · `workflow-cicd` · `workflow-threat-model`
 · `workflow-secrets` · `workflow-vuln-mgmt` · `workflow-cve-management` · `workflow-code-review`
 · `workflow-release` · `workflow-incident-response` · `workflow-data-lifecycle`
 · `workflow-runbooks` · `workflow-bootstrap` · `workflow-gated-actions`
-· `workflow-knowledge-base` (global)
+· `workflow-knowledge-base` (global) · `workflow-issue-tracking` (global)
+· `workflow-reverse-engineering` (opt-in)
 **Templates:** `templates/python-web-service` · `templates/typescript-service`
 · `templates/cli-tool` · `templates/library` · `templates/ai-llm-service`
 · `templates/web-frontend-spa` · `templates/serverless-function` · `templates/data-pipeline`
@@ -310,3 +332,5 @@ A change is done only when **all** of these hold (the granular rules expand each
   newline inside a command runs a fragment as its own command (e.g. a wrapped `ssh-add ~/.ssh/key`
   split so the key path executed standalone → "Permission denied"). Keep it one line even if long; if
   it's genuinely too long, write a script instead.
+
+@RTK.md

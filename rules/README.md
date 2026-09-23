@@ -130,6 +130,7 @@ Import paths use `~` (e.g. `@~/.claude/rules/lang-python.md`). Imports nest up t
 | `topic-migration` | Legacy migration — strangler-fig, parallel-run, anti-corruption layer, safe data migration |
 | `topic-local-dev` | Reproducible local setup — devcontainers, task runner, pre-commit hooks, safe defaults |
 | `topic-tailnet-dev-access` | Dev/preview services reachable at `<host>:<port>` over the tailnet (private), never public *(global)* |
+| `topic-docs-currency` | Living docs (README/docs/FAQ/CHANGELOG) updated in the same PR as the change *(global)* |
 
 ### Workflows (`workflow-*`)
 | Module | Scope |
@@ -137,6 +138,7 @@ Import paths use `~` (e.g. `@~/.claude/rules/lang-python.md`). Imports nest up t
 | `workflow-git` | Trunk-based branching, signed commits, mandatory PR review *(global)* |
 | `workflow-secrets` | Secret storage, rotation, detection *(global)* |
 | `workflow-knowledge-base` | How agents consult/contribute the shared ground-truth KB (MCP tools, gated promotion) *(global)* |
+| `workflow-issue-tracking` | Issue-tracked development + open external contribution into the review pipeline *(global)* |
 | `workflow-cicd` | CI/CD security gates (SAST/DAST/SCA/secret-scan, SBOM, signing) |
 | `workflow-threat-model` | STRIDE threat modeling at design time |
 | `workflow-vuln-mgmt` | Vulnerability monitoring, remediation SLAs, disclosure |
@@ -148,6 +150,7 @@ Import paths use `~` (e.g. `@~/.claude/rules/lang-python.md`). Imports nest up t
 | `workflow-runbooks` | Runbook mandate + standard set (indexes `runbooks/`) |
 | `workflow-bootstrap` | Procedure to start a new project (template → CLAUDE.md → docs/CI/runbooks) |
 | `workflow-gated-actions` | Human-in-the-loop gates: which actions need approval vs run autonomously |
+| `workflow-reverse-engineering` | RE sessions: opt-in YOLO permissions (`re-yolo`), sandbox untrusted execution, authorized targets only *(opt-in)* |
 
 *(global)* = imported by the master, so already active in every project.
 
