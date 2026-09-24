@@ -13,6 +13,23 @@
 !/scripts/
 !/docs/
 
+# Skills: track only first-party skill dirs. The rest are symlinks into ~/.agents/skills
+# (dangling for anyone else) or the auto-synced vendor tree (large, generated) — don't commit.
+/skills/synced/
+/skills/brandkit
+/skills/design-taste-frontend
+/skills/design-taste-frontend-v1
+/skills/full-output-enforcement
+/skills/gpt-taste
+/skills/high-end-visual-design
+/skills/image-to-code
+/skills/imagegen-frontend-mobile
+/skills/imagegen-frontend-web
+/skills/industrial-brutalist-ui
+/skills/minimalist-ui
+/skills/redesign-existing-projects
+/skills/stitch-design-taste
+
 # Belt-and-suspenders: never track these even if a rule above is loosened.
 .credentials.json
 .claude_session_key
