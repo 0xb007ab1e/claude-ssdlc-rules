@@ -200,7 +200,7 @@ Example — a Python web service handling personal data:
 · `topic-concurrency` · `topic-state-management` · `topic-numeric-correctness`
 · `topic-dependency-injection` · `topic-architecture-patterns` · `topic-anti-patterns`
 · `topic-token-optimization` · `topic-api-consumption` · `topic-notifications`
-· `topic-migration` · `topic-local-dev` · `topic-tailnet-dev-access` (global) · `topic-docs-currency` (global)
+· `topic-migration` · `topic-local-dev` · `topic-spec-driven` · `topic-tailnet-dev-access` (global) · `topic-docs-currency` (global)
 **Workflows:** `workflow-git` · `workflow-cicd` · `workflow-threat-model`
 · `workflow-secrets` · `workflow-vuln-mgmt` · `workflow-cve-management` · `workflow-code-review`
 · `workflow-release` · `workflow-incident-response` · `workflow-data-lifecycle`

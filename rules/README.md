@@ -124,6 +124,7 @@ Import paths use `~` (e.g. `@~/.claude/rules/lang-python.md`). Imports nest up t
 | `topic-dependency-injection` | IoC, constructor injection, composition root, lifetimes, no service-locator |
 | `topic-architecture-patterns` | Dependency rule, functional core/imperative shell, hexagonal/clean/onion |
 | `topic-anti-patterns` | Code-smell & anti-pattern catalog for review/refactor |
+| `topic-spec-driven` | Spec-Driven Development — spec-before-code, gate each phase, spec-kit + traceability |
 | `topic-token-optimization` | LLM token/cost reduction — prompt caching, routing, context trim, batching; when to apply |
 | `topic-api-consumption` | Consuming third-party APIs — timeouts/retries/circuit-break, schema-validate, pagination, SSRF |
 | `topic-notifications` | Email/SMS/push — deliverability (SPF/DKIM/DMARC), idempotent sends, consent, no PII |
