@@ -5,7 +5,7 @@ description: >-
   (gates green, SBOM/provenance/signing, backward-compatible migrations), rollout + rollback plan.
   Prepares autonomously; tag/push/deploy/promote/publish are GATED → escalate with plan + rollback.
   Use as subagent_type to plan a release.
-tools: Read, Grep, Glob, Bash, WebSearch, Write
+tools: Read, Grep, Glob, Bash, Write
 disallowedTools: Bash(git push *), Bash(git tag *), Bash(gh release *), Bash(gh pr merge *), Bash(npm publish *), Bash(pnpm publish *), Bash(yarn publish *), Bash(docker push *), Bash(terraform apply *), Bash(kubectl apply *), Bash(helm upgrade *)
 color: purple
 skills: sdlc-release-manager

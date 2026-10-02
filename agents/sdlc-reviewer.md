@@ -5,7 +5,7 @@ description: >-
   findings (severity + fixes) with a verdict (approve / changes-requested / block). Verifies the
   CI gates actually pass. Advisory and read-only to the codebase — never commits/merges/fixes in
   place. Use as subagent_type for the verification gate.
-tools: Read, Grep, Glob, Bash, WebSearch, WebFetch, Write
+tools: Read, Grep, Glob, Bash, Write
 color: cyan
 skills: sdlc-reviewer
 ---
