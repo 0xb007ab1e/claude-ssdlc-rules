@@ -9,10 +9,14 @@ browser via ``claude_usage``) and acts on the **worst** one:
   * below WARN  -> allow silently.
   * WARN..STOP  -> allow, but notify (desktop + stderr), naming the window(s)
                    that crossed WARN and when each resets. Rate-limited.
-  * >= STOP     -> BLOCK token-consuming tool calls (exit 2) and enter a
-                   "safe stop": write a resume checkpoint and notify, naming the
-                   window(s) over STOP. A small read-only allowlist stays
-                   permitted. Set CLAUDE_USAGE_OVERRIDE=1 to bypass one run.
+  * >= STOP     -> first try a one-shot ACCOUNT SWAP: if `claude-swap` has a
+                   non-active account whose every window is below WARN, rotate to
+                   it and (on restored capacity) allow the call. Otherwise BLOCK
+                   token-consuming tool calls (exit 2) and enter a "safe stop":
+                   write a resume checkpoint and notify, naming the window(s) over
+                   STOP. A small read-only allowlist stays permitted. Set
+                   CLAUDE_USAGE_OVERRIDE=1 to bypass one run; CLAUDE_USAGE_SWAP=0
+                   to disable the swap handoff.
 
 Note a weekly window over STOP keeps the block until that window resets (days),
 not just hours — the notification/stderr say which window and when, and override
@@ -36,6 +40,9 @@ Tunables (env vars):
     CLAUDE_USAGE_TTL      cache seconds     (default 60; 15 when any window >= WARN)
     CLAUDE_USAGE_OVERRIDE "1" to never block (one-run bypass)
     CLAUDE_USAGE_ALLOW    extra comma-separated tool names always allowed at STOP
+    CLAUDE_USAGE_SWAP     "0" to disable the account-swap handoff (default on)
+    CLAUDE_USAGE_SWAP_BIN claude-swap executable name/path (default "claude-swap")
+    CLAUDE_USAGE_SWAP_COOLDOWN  min seconds between swap attempts (default 120)
 
 Honest limits:
   * Utilization is a percentage + reset time, NOT a token count, so "will this
@@ -88,6 +95,16 @@ DEFAULT_ALLOW = {
     "Read", "Grep", "Glob", "TodoWrite", "TaskList", "TaskGet", "TaskOutput",
     "CronList", "BashOutput", "ExitPlanMode",
 }
+
+# Account-swap handoff: at STOP, rotate to a fresh managed account (via the
+# external `claude-swap` tool) BEFORE blocking, so work continues on another
+# account's quota. Opt-out with CLAUDE_USAGE_SWAP=0. A candidate must be a
+# non-active, enabled account whose every usage window is below WARN (genuinely
+# fresh) — otherwise fall through to the normal block. Fail-open: any error in
+# the swap path leaves the original block behavior intact.
+SWAP_ENABLED = os.environ.get("CLAUDE_USAGE_SWAP", "1") != "0"
+SWAP_BIN = os.environ.get("CLAUDE_USAGE_SWAP_BIN", "claude-swap")
+SWAP_COOLDOWN = float(os.environ.get("CLAUDE_USAGE_SWAP_COOLDOWN", "120"))
 
 
 # --------------------------------------------------------------------------- #
@@ -449,6 +466,98 @@ def land(session: str, worst_resets: str | None, reason: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Account-swap handoff (claude-swap integration)
+# --------------------------------------------------------------------------- #
+def _account_max_pct(acct: dict) -> float | None:
+    """Worst (highest) usage percentage across an account's windows, or None."""
+    usage = acct.get("usage") or {}
+    pcts: list[float] = []
+    for key in ("fiveHour", "sevenDay"):
+        win = usage.get(key) or {}
+        pct = win.get("pct")
+        if isinstance(pct, (int, float)):
+            pcts.append(float(pct))
+    for scoped in (usage.get("scoped") or []):
+        pct = scoped.get("pct")
+        if isinstance(pct, (int, float)):
+            pcts.append(float(pct))
+    return max(pcts) if pcts else None
+
+
+def swap_candidate() -> tuple[int, str, float] | None:
+    """Best inactive, enabled account genuinely below WARN (number, email, max_pct), else None.
+
+    Reads ``claude-swap list --json``. Fail-open: any error -> None (no candidate).
+    """
+    exe = shutil.which(SWAP_BIN)
+    if not exe:
+        return None
+    try:
+        res = subprocess.run([exe, "list", "--json"], timeout=10,
+                             capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0 or not (res.stdout or "").strip():
+        return None
+    try:
+        data = json.loads(res.stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    best: tuple[int, str, float] | None = None
+    for acct in data.get("accounts", []):
+        if acct.get("active") or acct.get("disabled"):
+            continue
+        if acct.get("usageStatus") not in (None, "ok", "warn"):
+            continue  # skip auth_required / error accounts
+        num = acct.get("number")
+        if not isinstance(num, int):
+            continue
+        amax = _account_max_pct(acct)
+        if amax is None or amax >= WARN:
+            continue  # must be genuinely fresh to actually relieve the STOP
+        if best is None or amax < best[2]:
+            best = (num, str(acct.get("email", "?")), amax)
+    return best
+
+
+def try_account_swap(state: dict, eff: float) -> bool:
+    """At STOP, rotate to a fresh account before blocking. Returns True if a swap
+    was performed (caller should re-read usage). Fail-open: any error -> False.
+
+    Guards against thrash with a cooldown (CLAUDE_USAGE_SWAP_COOLDOWN). Note: a
+    swap repoints ``~/.claude/.credentials.json``; a running session picks up the
+    new login on its next request (same mechanism cswap-auto relies on). If it
+    does not, the worst case is the tool call proceeds against the old account —
+    no worse than the block it replaces.
+    """
+    if not SWAP_ENABLED:
+        return False
+    if _now() - state.get("swap_attempt_at", 0) < SWAP_COOLDOWN:
+        return False
+    exe = shutil.which(SWAP_BIN)
+    if not exe:
+        return False
+    cand = swap_candidate()
+    if not cand:
+        return False
+    num, email, amax = cand
+    # Record the attempt up-front so a hang/crash can't trigger a retry loop.
+    state["swap_attempt_at"] = _now()
+    _save_state(state)
+    try:
+        res = subprocess.run([exe, "switch", str(num)], timeout=15,
+                             capture_output=True, text=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if res.returncode != 0:
+        return False
+    notify("Claude usage: swapped account",
+           f"At STOP ({eff:.0f}%) — switched to account {num} ({email}, "
+           f"{amax:.0f}% used) for fresh capacity instead of blocking.")
+    return True
+
+
+# --------------------------------------------------------------------------- #
 # The gate (PreToolUse hook entry)
 # --------------------------------------------------------------------------- #
 def gate(argv: list[str]) -> int:
@@ -523,6 +632,19 @@ def gate(argv: list[str]) -> int:
         return 0
 
     if level == "stop":
+        # Guard->swap handoff: on the FIRST hit this window, try rotating to a
+        # fresh account before blocking. If capacity is restored, allow the call.
+        if not state.get("blocked_since") and try_account_swap(state, eff):
+            state = refresh_state(force=True)
+            windows = state.get("windows") or []
+            max_util, worst_name, worst_resets = _max_util(windows)
+            if max_util is None:
+                return 0  # can't read the new account's usage -> fail open
+            eff = effective_stop(state)
+            if classify(max_util, eff) != "stop":
+                return 0  # swap relieved the limit; proceed on the new account
+            # still at STOP after the swap (no fresher account took effect) -> block
+
         if not state.get("blocked_since"):
             state["blocked_since"] = _now()
             ckpt = checkpoint(reason=f"stop: {offenders(windows, eff)}")
