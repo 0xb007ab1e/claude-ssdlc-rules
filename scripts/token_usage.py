@@ -14,12 +14,24 @@ falls back to the browser-cookie reader.
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-CREDENTIALS = Path.home() / ".claude" / ".credentials.json"
+
+def _config_home() -> Path:
+    """Claude Code's config home: ``CLAUDE_CONFIG_DIR`` if set (and non-empty),
+    else ``~/.claude``. Honoring it means a session launched under an isolated
+    per-account profile (e.g. ``cswap run``) is read at ITS credentials, not the
+    default login's — so the usage gate matches the account the session actually
+    uses."""
+    env = (os.environ.get("CLAUDE_CONFIG_DIR") or "").strip()
+    return Path(env) if env else (Path.home() / ".claude")
+
+
+CREDENTIALS = _config_home() / ".credentials.json"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 EXPIRY_SKEW_S = 60.0  # treat a token expiring within this as already expired
 
